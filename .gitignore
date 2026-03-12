@@ -1,0 +1,24 @@
+# Credentials
+.env
+
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+
+# Zip files
+*.zip
+
+# Screenshots (temp files from browser automation)
+*.png
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
