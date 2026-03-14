@@ -45,25 +45,58 @@ _load_env()
 # CONFIGURATION (loaded from .env)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# ── GoDaddy ──────────────────────────────────────────
-GODADDY_API_KEY    = os.environ.get("GODADDY_API_KEY", "")
-GODADDY_API_SECRET = os.environ.get("GODADDY_API_SECRET", "")
-GODADDY_ENV        = os.environ.get("GODADDY_ENV", "ote")
+# ── GoDaddy API accounts ──────────────────────────────
+GODADDY_ENV = os.environ.get("GODADDY_ENV", "ote")
 
-# ── GoDaddy Registrant Contact ───────────────────────
-REGISTRANT = {
-    "nameFirst": os.environ.get("REGISTRANT_FIRST_NAME", ""),
-    "nameLast":  os.environ.get("REGISTRANT_LAST_NAME", ""),
-    "email":     os.environ.get("REGISTRANT_EMAIL", ""),
-    "phone":     os.environ.get("REGISTRANT_PHONE", ""),
-    "addressMailing": {
-        "address1":   os.environ.get("REGISTRANT_ADDRESS", ""),
-        "city":       os.environ.get("REGISTRANT_CITY", ""),
-        "state":      os.environ.get("REGISTRANT_STATE", ""),
-        "postalCode": os.environ.get("REGISTRANT_POSTAL_CODE", ""),
-        "country":    os.environ.get("REGISTRANT_COUNTRY", "US"),
-    },
-}
+GODADDY_API_ACCOUNTS = []
+for _i in range(1, 10):
+    _key = os.environ.get(f"GODADDY_API_KEY_{_i}", "")
+    _secret = os.environ.get(f"GODADDY_API_SECRET_{_i}", "")
+    if _key and _secret:
+        GODADDY_API_ACCOUNTS.append({
+            "api_key": _key,
+            "api_secret": _secret,
+            "label": os.environ.get(f"GODADDY_API_LABEL_{_i}", f"Account {_i}"),
+            "registrant": {
+                "nameFirst": os.environ.get(f"REGISTRANT_FIRST_NAME_{_i}", ""),
+                "nameLast":  os.environ.get(f"REGISTRANT_LAST_NAME_{_i}", ""),
+                "email":     os.environ.get(f"REGISTRANT_EMAIL_{_i}", ""),
+                "phone":     os.environ.get(f"REGISTRANT_PHONE_{_i}", ""),
+                "addressMailing": {
+                    "address1":   os.environ.get(f"REGISTRANT_ADDRESS_{_i}", ""),
+                    "city":       os.environ.get(f"REGISTRANT_CITY_{_i}", ""),
+                    "state":      os.environ.get(f"REGISTRANT_STATE_{_i}", ""),
+                    "postalCode": os.environ.get(f"REGISTRANT_POSTAL_CODE_{_i}", ""),
+                    "country":    os.environ.get(f"REGISTRANT_COUNTRY_{_i}", "US"),
+                },
+            },
+        })
+    else:
+        break
+
+# Fallback: load old-style single account config if no numbered accounts found
+if not GODADDY_API_ACCOUNTS:
+    _key = os.environ.get("GODADDY_API_KEY", "")
+    _secret = os.environ.get("GODADDY_API_SECRET", "")
+    if _key and _secret:
+        GODADDY_API_ACCOUNTS.append({
+            "api_key": _key,
+            "api_secret": _secret,
+            "label": "Default",
+            "registrant": {
+                "nameFirst": os.environ.get("REGISTRANT_FIRST_NAME", ""),
+                "nameLast":  os.environ.get("REGISTRANT_LAST_NAME", ""),
+                "email":     os.environ.get("REGISTRANT_EMAIL", ""),
+                "phone":     os.environ.get("REGISTRANT_PHONE", ""),
+                "addressMailing": {
+                    "address1":   os.environ.get("REGISTRANT_ADDRESS", ""),
+                    "city":       os.environ.get("REGISTRANT_CITY", ""),
+                    "state":      os.environ.get("REGISTRANT_STATE", ""),
+                    "postalCode": os.environ.get("REGISTRANT_POSTAL_CODE", ""),
+                    "country":    os.environ.get("REGISTRANT_COUNTRY", "US"),
+                },
+            },
+        })
 
 # ── Telegram ─────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -211,21 +244,21 @@ GODADDY_BASE = (
     else "https://api.ote-godaddy.com"
 )
 
-def _gd_headers():
+def _gd_headers(account: dict):
     return {
-        "Authorization": f"sso-key {GODADDY_API_KEY}:{GODADDY_API_SECRET}",
+        "Authorization": f"sso-key {account['api_key']}:{account['api_secret']}",
         "Content-Type":  "application/json",
         "Accept":        "application/json",
     }
 
 
-def check_domain_availability(domain: str) -> tuple[bool, float]:
+def check_domain_availability(domain: str, account: dict) -> tuple[bool, float]:
     """
     Check if a domain is available.
     Returns (available: bool, price_usd: float).
     """
     url  = f"{GODADDY_BASE}/v1/domains/available"
-    resp = requests.get(url, headers=_gd_headers(), params={"domain": domain}, timeout=15)
+    resp = requests.get(url, headers=_gd_headers(account), params={"domain": domain}, timeout=15)
     resp.raise_for_status()
     data      = resp.json()
     available = data.get("available", False)
@@ -233,9 +266,10 @@ def check_domain_availability(domain: str) -> tuple[bool, float]:
     return available, price
 
 
-def purchase_domain(domain: str, years: int = 1) -> dict:
+def purchase_domain(domain: str, account: dict, years: int = 1) -> dict:
     """Purchase a domain on GoDaddy using the saved payment method on the account."""
     url = f"{GODADDY_BASE}/v1/domains/purchase"
+    registrant = account["registrant"]
     payload = {
         "domain":    domain,
         "period":    years,
@@ -243,15 +277,15 @@ def purchase_domain(domain: str, years: int = 1) -> dict:
         "privacy":   False,
         "consent": {
             "agreedAt":      datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "agreedBy":      REGISTRANT["email"],
+            "agreedBy":      registrant["email"],
             "agreementKeys": ["DNRA"],
         },
-        "contactAdmin":      REGISTRANT,
-        "contactBilling":    REGISTRANT,
-        "contactRegistrant": REGISTRANT,
-        "contactTech":       REGISTRANT,
+        "contactAdmin":      registrant,
+        "contactBilling":    registrant,
+        "contactRegistrant": registrant,
+        "contactTech":       registrant,
     }
-    resp = requests.post(url, headers=_gd_headers(), json=payload, timeout=30)
+    resp = requests.post(url, headers=_gd_headers(account), json=payload, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
@@ -421,6 +455,9 @@ active_browser = {}  # chat_id -> GoDaddyEmailBot instance
 # Website generation flow state
 pending_generate = {}  # chat_id -> {step, ...collected info}
 
+# Generated zips awaiting optional deploy
+_pending_deploys = {}  # chat_id -> {zip_path, domain}
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # BOT HANDLERS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -554,8 +591,23 @@ def handle_message(chat_id, text, message_id=None):
 
     # Command: /generate — generate website + job description
     if text == "/generate":
-        pending_generate[chat_id] = {"step": "awaiting_company_name"}
-        tg_send(chat_id, "🏗️ *Website Generator*\n\nWhat's the company name?\nExample: `2-3 Logistics Corp`")
+        pending_generate[chat_id] = {"step": "awaiting_info"}
+        tg_send(chat_id,
+                "🏗️ *Website Generator*\n\n"
+                "Send all info in one message using this format:\n\n"
+                "`Company: 2-3 Logistics Corp\n"
+                "Logo: 2-3 Logistics\n"
+                "Domain: 2-3logisticscorp.com\n"
+                "Email: info@2-3logisticscorp.com\n"
+                "Address: 508 Linden Dr\n"
+                "City: Round Lake, IL 60073\n"
+                "Job: OTR Company Driver — CDL-A\n"
+                "Pay: $1,300 – $1,600 / week\n"
+                "Home: Home every 2 weeks for 2 days\n"
+                "Home Short: 2 Weeks Out\n"
+                "Home Detail: Home 2 Days\n"
+                "Experience: 6 months\n"
+                "Perks: Weekly direct deposit, Health insurance, 401(k) with match`")
         return
 
     # Route to generate flow if user is in one
@@ -566,13 +618,31 @@ def handle_message(chat_id, text, message_id=None):
     tg_send(chat_id, "⚠️ Unknown command. Use `/buy`, `/setup`, `/email`, `/generate`, or `/start`.")
 
 
-def _check_and_buy_domain(chat_id, domain):
-    """Check domain availability and show Buy/Cancel buttons."""
+def _check_and_buy_domain(chat_id, domain, account_idx=None):
+    """Check domain availability — pick account first if needed."""
     log.info(f"Domain requested: {domain}")
+
+    if len(GODADDY_API_ACCOUNTS) == 0:
+        tg_send(chat_id, "🔴 No GoDaddy API accounts configured in `.env`")
+        return
+
+    # If multiple accounts and none selected yet, show picker
+    if account_idx is None and len(GODADDY_API_ACCOUNTS) > 1:
+        buttons = []
+        for i, acc in enumerate(GODADDY_API_ACCOUNTS):
+            buttons.append([{"text": acc["label"], "callback_data": f"buy_acc:{i}:{domain}"}])
+        tg_send(chat_id,
+                f"💰 *Purchase* `{domain}`\n\nWhich GoDaddy account?",
+                reply_markup={"inline_keyboard": buttons})
+        return
+
+    if account_idx is None:
+        account_idx = 0
+    account = GODADDY_API_ACCOUNTS[account_idx]
 
     tg_send(chat_id, f"🔍 Checking availability of `{domain}`...")
     try:
-        available, price = check_domain_availability(domain)
+        available, price = check_domain_availability(domain, account)
     except requests.HTTPError as e:
         msg = f"GoDaddy API error: {e}"
         log.error(msg)
@@ -583,14 +653,14 @@ def _check_and_buy_domain(chat_id, domain):
         tg_send(chat_id, f"❌ `{domain}` is not available for purchase.")
         return
 
-    # Show price and Buy/Cancel buttons
+    # Show price and Buy/Cancel buttons — encode account index in callback
     tg_send(
         chat_id,
         f"✅ `{domain}` is available — *${price:.2f}/year*\n\n"
         f"Purchase this domain?",
         reply_markup={
             "inline_keyboard": [[
-                {"text": "💰 Buy", "callback_data": f"buy:{domain}"},
+                {"text": "💰 Buy", "callback_data": f"buy:{account_idx}:{domain}"},
                 {"text": "❌ Cancel", "callback_data": "cancel"},
             ]]
         },
@@ -601,57 +671,65 @@ def _check_and_buy_domain(chat_id, domain):
 # WEBSITE GENERATION FLOW
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-GENERATE_STEPS = [
-    ("awaiting_company_name", "company_name", "What's the short name for the logo?\nExample: `2-3 Logistics`"),
-    ("awaiting_company_short", "company_short", "What's the domain?\nExample: `2-3logisticscorp.com`"),
-    ("awaiting_domain", "domain", "Contact email?\nExample: `info@2-3logisticscorp.com`"),
-    ("awaiting_email", "email", "Street address?\nExample: `508 Linden Dr`"),
-    ("awaiting_address", "address", "City, State, Zip?\nExample: `Round Lake, IL 60073`"),
-    ("awaiting_city_state", "city_state", "Job title?\nExample: `OTR Company Driver — CDL-A`"),
-    ("awaiting_job_title", "job_title", "Pay range?\nExample: `$1,300 – $1,600 / week`"),
-    ("awaiting_pay_range", "pay_range", "Home time?\nExample: `Home every 2 weeks for 2 days`"),
-    ("awaiting_home_time", "home_time", "Home time short (for card)?\nExample: `2 Weeks Out`"),
-    ("awaiting_home_time_short", "home_time_short", "Home time detail (card subtitle)?\nExample: `Home 2 Days`"),
-    ("awaiting_home_time_detail", "home_time_detail", "Minimum experience?\nExample: `6 months`"),
-    ("awaiting_min_exp", "min_experience", "Now list the perks/benefits, one per line.\nWhen done, send `done`.\n\nExample:\n`Weekly direct deposit\nHealth insurance\n401(k) with match`"),
-]
+# Field mapping: label in user message → internal field name
+_GENERATE_FIELDS = {
+    "company": "company_name",
+    "logo": "company_short",
+    "domain": "domain",
+    "email": "email",
+    "address": "address",
+    "city": "city_state",
+    "job": "job_title",
+    "pay": "pay_range",
+    "home": "home_time",
+    "home short": "home_time_short",
+    "home detail": "home_time_detail",
+    "experience": "min_experience",
+    "perks": "perks",
+}
+
+_GENERATE_REQUIRED = ["company_name", "domain", "email", "city_state", "job_title", "pay_range"]
 
 
 def _handle_generate_input(chat_id, raw_text):
-    """Process text input during website generation flow."""
+    """Parse the single-message info block and generate."""
     state = pending_generate[chat_id]
-    step = state["step"]
 
-    # Handle perks collection
-    if step == "awaiting_perks":
-        if raw_text.strip().lower() == "done":
-            _finish_generate(chat_id)
-            return
-        # Add perks (support multiple lines in one message)
-        perks = state.get("perks", [])
-        for line in raw_text.strip().splitlines():
-            line = line.strip()
-            if line:
-                perks.append(line)
-        state["perks"] = perks
-        tg_send(chat_id, f"Added {len(perks)} perk(s) so far. Send more or send `done` to finish.")
+    # Parse "Label: Value" lines
+    parsed = {}
+    for line in raw_text.strip().splitlines():
+        if ":" not in line:
+            continue
+        label, _, value = line.partition(":")
+        label = label.strip().lower()
+        value = value.strip()
+        if not value:
+            continue
+        # Match label to field
+        if label in _GENERATE_FIELDS:
+            field = _GENERATE_FIELDS[label]
+            if field == "perks":
+                parsed[field] = [p.strip() for p in value.split(",") if p.strip()]
+            else:
+                parsed[field] = value
+
+    if not parsed:
+        tg_send(chat_id, "⚠️ Couldn't parse that. Use the `Label: Value` format, one per line.")
         return
 
-    # Walk through the steps
-    for i, (step_name, field, next_prompt) in enumerate(GENERATE_STEPS):
-        if step == step_name:
-            state[field] = raw_text.strip()
-            # Move to next step
-            if i + 1 < len(GENERATE_STEPS):
-                next_step = GENERATE_STEPS[i + 1][0]
-                state["step"] = next_step
-                tg_send(chat_id, next_prompt)
-            else:
-                # Last step done — move to perks
-                state["step"] = "awaiting_perks"
-                state["perks"] = []
-                tg_send(chat_id, "Now list the perks/benefits, one per line.\nWhen done, send `done`.\n\nExample:\n`Weekly direct deposit\nHealth insurance\n401(k) with match`")
-            return
+    # Check required fields
+    missing = [label for label, field in [
+        ("Company", "company_name"), ("Domain", "domain"), ("Email", "email"),
+        ("City", "city_state"), ("Job", "job_title"), ("Pay", "pay_range"),
+    ] if field not in parsed]
+
+    if missing:
+        tg_send(chat_id, f"⚠️ Missing required fields: {', '.join(missing)}\n\nPlease resend with all fields.")
+        return
+
+    # Merge parsed into state and generate
+    state.update(parsed)
+    _finish_generate(chat_id)
 
 
 def _finish_generate(chat_id):
@@ -662,18 +740,20 @@ def _finish_generate(chat_id):
     try:
         from website_generator import generate_website, generate_job_description
 
+        # Build info with defaults for optional fields
+        company = state["company_name"]
         info = {
-            "company_name": state["company_name"],
-            "company_short": state["company_short"],
+            "company_name": company,
+            "company_short": state.get("company_short", company.split()[0]),
             "domain": state["domain"],
             "email": state["email"],
-            "address": state["address"],
+            "address": state.get("address", ""),
             "city_state": state["city_state"],
             "job_title": state["job_title"],
             "pay_range": state["pay_range"],
-            "home_time": state["home_time"],
-            "home_time_short": state["home_time_short"],
-            "home_time_detail": state["home_time_detail"],
+            "home_time": state.get("home_time", ""),
+            "home_time_short": state.get("home_time_short", ""),
+            "home_time_detail": state.get("home_time_detail", ""),
             "min_experience": state.get("min_experience", "6 months"),
             "fourth_card_value": state.get("min_experience", "6 Mo. Exp"),
             "fourth_card_label": "Min. Required",
@@ -702,11 +782,21 @@ def _finish_generate(chat_id):
             for i in range(0, len(job_desc), 4000):
                 tg_send(chat_id, job_desc[i:i+4000])
 
-        # Clean up
-        try:
-            os.remove(zip_path)
-        except OSError:
-            pass
+        # Store zip path for optional deploy — don't delete yet
+        pending_deploy = {
+            "zip_path": zip_path,
+            "domain": state["domain"],
+        }
+        # Store in a dict so the callback can find it
+        _pending_deploys[chat_id] = pending_deploy
+
+        tg_send(chat_id, "Deploy this website now?",
+                reply_markup={
+                    "inline_keyboard": [[
+                        {"text": "🚀 Deploy to Hosting", "callback_data": "gen_deploy"},
+                        {"text": "✅ Done", "callback_data": "gen_done"},
+                    ]]
+                })
 
         log.info(f"Website + job desc sent for {state['domain']}")
 
@@ -921,7 +1011,7 @@ def _handle_email_input(chat_id, raw_text, message_id=None):
                 tg_delete_message(chat_id, message_id)
             except Exception:
                 pass
-        default_email = REGISTRANT.get("email", "")
+        default_email = GODADDY_API_ACCOUNTS[0]["registrant"]["email"] if GODADDY_API_ACCOUNTS else ""
         tg_send(chat_id,
                 f"📬 Send account info to which email?\n\n"
                 f"Default: `{default_email}`",
@@ -1097,12 +1187,44 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
         log.info("User cancelled purchase.")
         return
 
+    if data.startswith("buy_acc:"):
+        # Account picker callback: buy_acc:IDX:domain
+        parts = data.split(":", 2)
+        idx = int(parts[1])
+        domain = parts[2]
+        tg_edit_message(chat_id, message_id, f"Account: {GODADDY_API_ACCOUNTS[idx]['label']}")
+        _check_and_buy_domain(chat_id, domain, account_idx=idx)
+        return
+
     if data.startswith("buy:"):
-        domain = data.split(":", 1)[1]
+        # Format: buy:ACC_IDX:domain
+        parts = data.split(":", 2)
+        acc_idx = int(parts[1])
+        domain = parts[2]
+        acc_label = GODADDY_API_ACCOUNTS[acc_idx]["label"]
+        tg_edit_message(chat_id, message_id, f"💰 Buy `{domain}`?")
+        tg_send(chat_id,
+                f"⚠️ *Final Confirmation*\n\n"
+                f"This will charge the payment method on your GoDaddy account ({acc_label}).\n\n"
+                f"Domain: `{domain}`\n\n"
+                f"Are you sure?",
+                reply_markup={
+                    "inline_keyboard": [[
+                        {"text": "✅ Confirm Purchase", "callback_data": f"confirm_buy:{acc_idx}:{domain}"},
+                        {"text": "❌ Cancel", "callback_data": "cancel"},
+                    ]]
+                })
+        return
+
+    if data.startswith("confirm_buy:"):
+        parts = data.split(":", 2)
+        acc_idx = int(parts[1])
+        domain = parts[2]
+        account = GODADDY_API_ACCOUNTS[acc_idx]
         tg_edit_message(chat_id, message_id, f"⏳ Purchasing `{domain}`...")
 
         try:
-            order = purchase_domain(domain)
+            order = purchase_domain(domain, account)
             order_id = order.get("orderId", "N/A")
             log.info(f"Domain purchased: {domain} | Order ID: {order_id}")
             tg_send(chat_id,
@@ -1168,7 +1290,7 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
         if not state:
             return
         if data == "email_notify:default":
-            state["notify_email"] = REGISTRANT.get("email", "")
+            state["notify_email"] = GODADDY_API_ACCOUNTS[0]["registrant"]["email"] if GODADDY_API_ACCOUNTS else ""
         tg_edit_message(chat_id, message_id, f"Notify: {state['notify_email']}")
         _launch_email_browser(chat_id)
         return
@@ -1206,6 +1328,106 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
 
     if data == "browser_keep":
         tg_edit_message(chat_id, message_id, "👀 Browser kept open. Use `/close` to close it later.")
+        return
+
+    # ── Generate deploy callbacks ────────────────────
+    if data == "gen_done":
+        deploy = _pending_deploys.pop(chat_id, None)
+        if deploy:
+            try:
+                os.remove(deploy["zip_path"])
+            except OSError:
+                pass
+        tg_edit_message(chat_id, message_id, "✅ Done!")
+        return
+
+    if data == "gen_deploy":
+        deploy = _pending_deploys.get(chat_id)
+        if not deploy:
+            tg_edit_message(chat_id, message_id, "🔴 Zip expired. Generate again with `/generate`.")
+            return
+        tg_edit_message(chat_id, message_id, "🚀 Deploying...")
+        if len(CPANEL_ACCOUNTS) == 0:
+            tg_send(chat_id, "🔴 No cPanel accounts configured in `.env`")
+            return
+        if len(CPANEL_ACCOUNTS) == 1:
+            # Single account — deploy directly using callback handler
+            deploy["account_idx"] = 0
+            _pending_deploys[chat_id] = deploy
+            handle_callback(callback_query_id, chat_id, message_id, "gen_deploy_acc:0")
+        else:
+            # Show account picker
+            buttons = []
+            for i, acc in enumerate(CPANEL_ACCOUNTS):
+                buttons.append([{"text": acc["label"], "callback_data": f"gen_deploy_acc:{i}"}])
+            tg_send(chat_id, "Which hosting account?",
+                    reply_markup={"inline_keyboard": buttons})
+        return
+
+    if data.startswith("gen_deploy_acc:"):
+        deploy = _pending_deploys.pop(chat_id, None)
+        if not deploy:
+            return
+        idx = int(data.split(":")[1])
+        domain = deploy["domain"]
+        zip_path = deploy["zip_path"]
+        account = CPANEL_ACCOUNTS[idx]
+
+        # Create domain on cPanel
+        tg_send(chat_id, f"🌐 Adding `{domain}` to hosting ({account['label']})...")
+        try:
+            result = cpanel_create_domain(domain, account)
+            errors = result.get("errors")
+            if errors:
+                error_msg = str(errors)
+                if "already" in error_msg.lower() or "exists" in error_msg.lower():
+                    tg_send(chat_id, f"ℹ️ `{domain}` already exists in hosting. Continuing...")
+                else:
+                    tg_send(chat_id, f"🔴 Failed to add domain:\n`{error_msg}`")
+                    return
+            else:
+                tg_send(chat_id, f"✅ `{domain}` added to hosting!")
+        except Exception as e:
+            tg_send(chat_id, f"🔴 Failed to add domain:\n`{e}`")
+            return
+
+        # Upload zip to cPanel
+        dest_dir = f"/public_html/{domain}"
+        file_name = Path(zip_path).name
+        tg_send(chat_id, f"📤 Uploading to `{dest_dir}`...")
+        try:
+            cpanel_upload_file(zip_path, dest_dir, account)
+            log.info(f"Uploaded {file_name} to {dest_dir}")
+        except Exception as e:
+            tg_send(chat_id, f"🔴 Upload failed:\n`{e}`")
+            return
+        finally:
+            try:
+                os.remove(zip_path)
+            except OSError:
+                pass
+
+        # Extract
+        archive_path = f"{dest_dir}/{file_name}"
+        tg_send(chat_id, f"📂 Extracting `{file_name}`...")
+        try:
+            cpanel_extract_file(archive_path, dest_dir, account)
+            log.info(f"Extracted {file_name} in {dest_dir}")
+        except Exception as e:
+            tg_send(chat_id, f"🔴 Extraction failed:\n`{e}`")
+            return
+
+        # Delete zip from server
+        try:
+            cpanel_delete_file(archive_path, account)
+        except Exception:
+            pass
+
+        tg_send(chat_id,
+                f"✅ *Website deployed!*\n\n"
+                f"Domain: `{domain}`\n"
+                f"Your site should be live at: http://{domain}")
+        log.info(f"Generated website deployed for {domain}")
         return
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
