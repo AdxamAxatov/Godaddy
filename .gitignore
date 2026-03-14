@@ -9,14 +9,26 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Logs
-*.log
+# Logs and debug screenshots
+logs/
 
 # Zip files
 *.zip
 
-# Screenshots (temp files from browser automation)
+# Flow reference images (internal docs)
+flow/
+
+# Website examples (internal reference)
+Websites/
+
+# Browser profiles (persistent session cookies)
+browser_data/
+
+# Temp/debug images
 *.png
+
+# Claude Code instructions (local only)
+CLAUDE.md
 
 # OS junk
 Thumbs.db
