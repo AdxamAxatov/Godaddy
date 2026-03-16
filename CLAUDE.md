@@ -15,7 +15,7 @@ python src/main.py              # Starts Telegram long-polling loop
 
 ## Dependencies
 
-Python 3.12, managed via a local `.venv`. Key packages: `requests`, `playwright`. Browser automation uses the system's real Chrome (`channel="chrome"`), not Playwright's bundled Chromium, to avoid GoDaddy's bot detection.
+Python 3.12, managed via a local `.venv`. Key packages: `requests`, `playwright`. No `requirements.txt` — install with `pip install requests playwright`. Browser automation uses the system's real Chrome (`channel="chrome"`), not Playwright's bundled Chromium, to avoid GoDaddy's bot detection.
 
 ## Architecture
 
@@ -70,6 +70,17 @@ Generates unique trucking company websites from templates:
 - Sections: Nav → Hero → How We Work → About/Coverage → Careers (highlights only) → Contact → Footer
 - All CSS inline, responsive, scroll animations, hamburger menu
 
+## Logging
+
+Logger name: `automation`. INFO to console (stdout), DEBUG to `logs/automation.log`. Debug screenshots from browser automation failures are saved as `logs/debug_*.png`.
+
+## Supporting Directories
+
+- `assets/stock_images/` — stock photos bundled into generated websites by `website_generator.py`
+- `flow/` — reference screenshots documenting the GoDaddy Email & Office manual flow (not used by code)
+- `Websites/` — example generated website outputs (not used by code)
+- `browser_data/account_N/` — persistent Chrome profiles for each GoDaddy login account
+
 ## Configuration
 
 All config loaded from `.env` via custom `_load_env()` (no python-dotenv). Key groups:
@@ -106,3 +117,10 @@ Each GoDaddy account gets its own browser profile (`browser_data/account_1/`, `a
 - Per-account persistent profiles (`browser_data/account_N/`) keep sessions alive across restarts
 - Browser runs with `headless=False` — GoDaddy's anti-bot detection is more aggressive against headless browsers
 - When only one expiration date exists, there's no dropdown — just static text. `get_expiration_dates()` handles both cases
+
+## Notes
+
+- No tests or linting configured — this is a single-user automation tool
+- CLAUDE.md is gitignored (local-only, not committed to the repo)
+- `.env` is loaded by a custom `_load_env()` function (no python-dotenv dependency)
+- All three source files are standalone scripts with no shared base classes or utility modules

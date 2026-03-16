@@ -100,7 +100,8 @@ if not GODADDY_API_ACCOUNTS:
 
 # ── Telegram ─────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
+TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")  # Admin chat ID
+ADMIN_CHAT_ID      = str(TELEGRAM_CHAT_ID)
 
 # ── cPanel accounts ────────────────────────────────
 CPANEL_ACCOUNTS = []
@@ -156,6 +157,44 @@ def setup_logging():
     return logger
 
 log = setup_logging()
+
+# ── User approval system ─────────────────────────────
+_APPROVED_USERS_FILE = str(_PROJECT_ROOT / "approved_users.json")
+_pending_approvals = {}  # chat_id str -> {name, username} — awaiting admin decision
+
+def _load_approved_users() -> dict:
+    """Load approved users from JSON file. Returns {id_str: {name, username}}."""
+    try:
+        with open(_APPROVED_USERS_FILE, "r") as f:
+            data = json.load(f)
+            users = data.get("approved", {})
+            # Handle old format (list of IDs) gracefully
+            if isinstance(users, list):
+                return {str(uid): {"name": "Unknown", "username": ""} for uid in users}
+            return {str(k): v for k, v in users.items()}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def _save_approved_users(users: dict):
+    """Save approved users to JSON file."""
+    with open(_APPROVED_USERS_FILE, "w") as f:
+        json.dump({"approved": users}, f, indent=2)
+
+APPROVED_USERS = _load_approved_users()
+APPROVED_USERS[ADMIN_CHAT_ID] = {"name": "Admin", "username": ""}  # Admin always approved
+
+def is_authorized(chat_id) -> bool:
+    """Check if a user is approved."""
+    return str(chat_id) in APPROVED_USERS
+
+def _get_user_display(msg) -> str:
+    """Get a display name from a Telegram message's 'from' field."""
+    user = msg.get("from", {})
+    first = user.get("first_name", "")
+    last = user.get("last_name", "")
+    username = user.get("username", "")
+    name = f"{first} {last}".strip() or "Unknown"
+    return f"{name} (@{username})" if username else name
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TELEGRAM BOT
@@ -227,10 +266,10 @@ def tg_delete_message(chat_id, message_id):
 
 def tg_get_updates(offset=None):
     """Long-poll for new updates from Telegram."""
-    params = {"timeout": 30}
+    params = {"timeout": 5}
     if offset:
         params["offset"] = offset
-    resp = requests.get(f"{TG_BASE}/getUpdates", params=params, timeout=35)
+    resp = requests.get(f"{TG_BASE}/getUpdates", params=params, timeout=10)
     resp.raise_for_status()
     return resp.json().get("result", [])
 
@@ -250,6 +289,41 @@ def _gd_headers(account: dict):
         "Content-Type":  "application/json",
         "Accept":        "application/json",
     }
+
+
+def check_indeed_company(company_name: str) -> str | None:
+    """
+    Google '{company_name} Indeed', screenshot the results page.
+    Returns the screenshot file path, or None on failure.
+    """
+    from playwright.sync_api import sync_playwright
+    screenshot_path = str(_PROJECT_ROOT / "logs" / f"indeed_{int(time.time())}.png")
+    profile_dir = str(_PROJECT_ROOT / "browser_data" / "indeed")
+    try:
+        pw = sync_playwright().start()
+        context = pw.chromium.launch_persistent_context(
+            user_data_dir=profile_dir,
+            channel="chrome",
+            headless=False,
+            args=["--disable-blink-features=AutomationControlled"],
+            viewport={"width": 1280, "height": 900},
+        )
+        page = context.pages[0] if context.pages else context.new_page()
+        query = f"{company_name} Indeed"
+        page.goto(f"https://www.google.com/search?q={quote(query)}", wait_until="domcontentloaded")
+        page.wait_for_timeout(3000)
+        # If CAPTCHA appears, wait for user to solve it
+        if "unusual traffic" in (page.content() or ""):
+            log.info("Google CAPTCHA detected — waiting for user to solve it...")
+            page.wait_for_url("**/search?q=*", timeout=60000)
+            page.wait_for_timeout(2000)
+        page.screenshot(path=screenshot_path, full_page=False)
+        context.close()
+        pw.stop()
+        return screenshot_path
+    except Exception as e:
+        log.error(f"Indeed check failed: {e}")
+        return None
 
 
 def check_domain_availability(domain: str, account: dict) -> tuple[bool, float]:
@@ -447,7 +521,7 @@ pending_website_domain = {}  # chat_id -> domain
 pending_email = {}  # chat_id -> {step, domain, username, first_name, ...}
 
 # Domain purchase flow state
-pending_buy = {}  # chat_id -> {"step": "awaiting_domain"}
+pending_buy = {}  # chat_id -> {"step": "awaiting_company" | "awaiting_domain", ...}
 
 # Active browser sessions (kept open after email creation)
 active_browser = {}  # chat_id -> GoDaddyEmailBot instance
@@ -464,6 +538,7 @@ _pending_deploys = {}  # chat_id -> {zip_path, domain}
 
 def handle_message(chat_id, text, message_id=None):
     """Handle an incoming text message."""
+    log.info(f"[{chat_id}] Message: {text.strip()}")
     raw_text = text.strip()
     text = raw_text.lower()
 
@@ -471,11 +546,10 @@ def handle_message(chat_id, text, message_id=None):
         tg_send(chat_id,
                 "👋 *GoDaddy Domain Bot*\n\n"
                 "What I can do:\n"
-                "• `/buy` → check availability & purchase a domain\n"
-                "• `/setup` → add domain to hosting & deploy website\n"
-                "• `/email` → create M365 email account\n"
-                "• `/generate` → generate website + job description\n\n"
-                "Example: `/buy` then `mysite.com`")
+                "• /buy — purchase a domain\n"
+                "• /setup — deploy a website\n"
+                "• /email — create an email account\n"
+                "• /generate — generate website + job description")
         return
 
     # Command: /cancel — cancel any active flow
@@ -510,6 +584,48 @@ def handle_message(chat_id, text, message_id=None):
             log.info("Browser closed via /close command")
         else:
             tg_send(chat_id, "No browser is open.")
+        return
+
+    # Command: /users — list approved users (admin only)
+    if text == "/users":
+        if str(chat_id) != ADMIN_CHAT_ID:
+            tg_send(chat_id, "⚠️ Admin only.")
+            return
+        if not APPROVED_USERS:
+            tg_send(chat_id, "No approved users.")
+        else:
+            lines = ["👥 *Approved Users*\n"]
+            for uid in sorted(APPROVED_USERS):
+                info = APPROVED_USERS[uid]
+                name = info.get("name", "Unknown")
+                username = info.get("username", "")
+                role = "👑 Admin" if uid == ADMIN_CHAT_ID else "👤 User"
+                display = f"@{username}" if username else name
+                lines.append(f"{role}: {display} (`{uid}`)")
+            tg_send(chat_id, "\n".join(lines))
+        return
+
+    # Command: /revoke — remove a user (admin only)
+    if text.startswith("/revoke"):
+        if str(chat_id) != ADMIN_CHAT_ID:
+            tg_send(chat_id, "⚠️ Admin only.")
+            return
+        parts = text.split()
+        if len(parts) < 2:
+            tg_send(chat_id, "Usage: `/revoke <user_id>`")
+            return
+        target_id = parts[1].strip()
+        if target_id == ADMIN_CHAT_ID:
+            tg_send(chat_id, "⚠️ Cannot revoke admin.")
+            return
+        if target_id in APPROVED_USERS:
+            del APPROVED_USERS[target_id]
+            _save_approved_users(APPROVED_USERS)
+            tg_send(chat_id, f"✅ User `{target_id}` has been revoked.")
+            tg_send(int(target_id), "🔒 Your access has been revoked by the admin.")
+            log.info(f"User {target_id} revoked by admin")
+        else:
+            tg_send(chat_id, f"User `{target_id}` is not in the approved list.")
         return
 
     # Command: /email — create email account
@@ -567,20 +683,37 @@ def handle_message(chat_id, text, message_id=None):
 
     # Command: /buy — purchase a domain
     if text == "/buy" or text.startswith("/buy "):
-        domain = text.split(" ", 1)[1].strip() if " " in text else ""
-        if domain:
-            if not DOMAIN_RE.match(domain):
-                tg_send(chat_id, "⚠️ Invalid domain format. Example: `mysite.com`")
-                return
-            _check_and_buy_domain(chat_id, domain)
-        else:
-            pending_buy[chat_id] = {"step": "awaiting_domain"}
-            tg_send(chat_id, "💰 *Domain Purchase*\n\nWhat domain? Example: `mysite.com`")
+        pending_buy[chat_id] = {"step": "awaiting_company"}
+        tg_send(chat_id, "💰 *Domain Purchase*\n\nWhat is the company name?\nExample: `Werner Enterprises`")
         return
 
-    # Route to buy flow if user is in one (awaiting domain)
+    # Route to buy flow if user is in one
     if chat_id in pending_buy:
-        if pending_buy[chat_id].get("step") == "awaiting_domain":
+        step = pending_buy[chat_id].get("step")
+
+        if step == "awaiting_company":
+            company = text.strip()
+            if not company:
+                tg_send(chat_id, "⚠️ Please enter a company name.")
+                return
+            tg_send(chat_id, f"🔍 Searching Indeed for *{company}*...")
+            screenshot = check_indeed_company(company)
+            if screenshot:
+                pending_buy[chat_id] = {"step": "awaiting_indeed_decision", "company": company}
+                tg_send_photo(chat_id, screenshot,
+                              caption=f"Indeed results for *{company}*\n\nDoes this company already exist on Indeed?")
+                tg_send(chat_id, "Does the company exist on Indeed?",
+                        reply_markup={"inline_keyboard": [[
+                            {"text": "✅ Yes, exists", "callback_data": "indeed_yes"},
+                            {"text": "❌ No, doesn't exist", "callback_data": "indeed_no"},
+                        ]]})
+            else:
+                tg_send(chat_id, "⚠️ Could not check Indeed. Proceeding to domain input.")
+                pending_buy[chat_id] = {"step": "awaiting_domain", "company": company}
+                tg_send(chat_id, "What domain? Example: `mysite.com`")
+            return
+
+        if step == "awaiting_domain":
             domain = text.strip()
             if not DOMAIN_RE.match(domain):
                 tg_send(chat_id, "⚠️ Invalid domain format. Example: `mysite.com`")
@@ -860,6 +993,7 @@ def _start_website_setup(chat_id, domain, account_idx=None):
 
 def handle_document(chat_id, document, message):
     """Handle a file/document upload (zip file for website deployment)."""
+    log.info(f"[{chat_id}] Document: {document.get('file_name', 'unknown')}")
     pending = pending_website_domain.get(chat_id)
 
     if not pending or not isinstance(pending, dict) or "domain" not in pending:
@@ -1180,11 +1314,61 @@ def _submit_email(chat_id):
 
 def handle_callback(callback_query_id, chat_id, message_id, data):
     """Handle an inline button press."""
+    log.info(f"[{chat_id}] Callback: {data}")
     tg_answer_callback(callback_query_id)
+
+    # Admin: approve/deny user access
+    if data.startswith("approve:"):
+        target_id = data.split(":", 1)[1]
+        user_info = _pending_approvals.pop(target_id, {"name": "Unknown", "username": ""})
+        APPROVED_USERS[target_id] = user_info
+        _save_approved_users(APPROVED_USERS)
+        tg_edit_message(chat_id, message_id, f"✅ User `{target_id}` approved.")
+        tg_send(int(target_id), "✅ Your access has been approved! Send /start to begin.")
+        log.info(f"User {target_id} approved by admin")
+        return
+
+    if data.startswith("deny:"):
+        target_id = data.split(":", 1)[1]
+        _pending_approvals.pop(target_id, None)
+        tg_edit_message(chat_id, message_id, f"❌ User `{target_id}` denied.")
+        tg_send(int(target_id), "❌ Your access request has been denied.")
+        log.info(f"User {target_id} denied by admin")
+        return
 
     if data == "cancel":
         tg_edit_message(chat_id, message_id, "🚫 Purchase cancelled.")
         log.info("User cancelled purchase.")
+        return
+
+    if data == "indeed_yes":
+        company = pending_buy.get(chat_id, {}).get("company", "Company")
+        tg_edit_message(chat_id, message_id, f"✅ *{company}* exists on Indeed.")
+        tg_send(chat_id,
+                f"⚠️ *{company}* already exists on Indeed.\n\n"
+                f"Want to try a different company?",
+                reply_markup={"inline_keyboard": [[
+                    {"text": "🔄 Try another", "callback_data": "indeed_retry"},
+                    {"text": "❌ Cancel", "callback_data": "indeed_cancel"},
+                ]]})
+        return
+
+    if data == "indeed_retry":
+        tg_edit_message(chat_id, message_id, "🔄 Trying another company.")
+        pending_buy[chat_id] = {"step": "awaiting_company"}
+        tg_send(chat_id, "What is the company name?")
+        return
+
+    if data == "indeed_cancel":
+        tg_edit_message(chat_id, message_id, "🚫 Purchase cancelled.")
+        pending_buy.pop(chat_id, None)
+        return
+
+    if data == "indeed_no":
+        company = pending_buy.get(chat_id, {}).get("company", "Company")
+        tg_edit_message(chat_id, message_id, f"❌ *{company}* not found on Indeed.")
+        pending_buy[chat_id] = {"step": "awaiting_domain", "company": company}
+        tg_send(chat_id, "What domain? Example: `mysite.com`")
         return
 
     if data.startswith("buy_acc:"):
@@ -1444,6 +1628,8 @@ def tg_set_commands():
         {"command": "generate", "description": "Generate website + job description"},
         {"command": "close", "description": "Close the browser"},
         {"command": "cancel", "description": "Cancel current operation"},
+        {"command": "users", "description": "List approved users (admin)"},
+        {"command": "revoke", "description": "Revoke user access (admin)"},
     ]
     try:
         requests.post(f"{TG_BASE}/setMyCommands",
@@ -1468,9 +1654,6 @@ def run():
     print()
     print("  Press Ctrl+C to stop.\n")
 
-    # Register commands so they show in Telegram's menu
-    tg_set_commands()
-
     # Flush old updates that arrived while bot was offline
     try:
         stale = tg_get_updates(offset=None)
@@ -1482,21 +1665,26 @@ def run():
     except Exception:
         offset = None
 
-    # Send a startup message to Telegram so user knows the bot is ready
+    # Send startup message after flush so it doesn't get skipped
     try:
         tg_send(TELEGRAM_CHAT_ID,
                 "🤖 *Bot is online!*\n\n"
-                "`/buy` — purchase a domain\n"
-                "`/setup` — deploy a website\n"
-                "`/email` — create an email account\n"
-                "`/generate` — generate website + job description")
+                "/buy — purchase a domain\n"
+                "/setup — deploy a website\n"
+                "/email — create an email account\n"
+                "/generate — generate website + job description")
         log.info("Startup message sent to Telegram")
     except Exception as e:
         log.error(f"Failed to send startup message: {e}")
 
+    # Register commands so they show in Telegram's menu
+    tg_set_commands()
+
     while True:
         try:
             updates = tg_get_updates(offset)
+        except KeyboardInterrupt:
+            raise
         except Exception as e:
             log.warning(f"Polling error: {e}")
             time.sleep(5)
@@ -1505,11 +1693,30 @@ def run():
         for update in updates:
             offset = update["update_id"] + 1
 
-            # Only respond to the authorized chat
             if "message" in update:
                 msg = update["message"]
                 chat_id = msg["chat"]["id"]
-                if str(chat_id) != str(TELEGRAM_CHAT_ID):
+
+                # Unapproved user — send access request to admin
+                if not is_authorized(chat_id):
+                    str_id = str(chat_id)
+                    if str_id not in _pending_approvals:
+                        user = msg.get("from", {})
+                        _pending_approvals[str_id] = {
+                            "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or "Unknown",
+                            "username": user.get("username", ""),
+                        }
+                        display = _get_user_display(msg)
+                        tg_send(chat_id, "🔒 You don't have access to this bot.\nA request has been sent to the admin.")
+                        tg_send(int(ADMIN_CHAT_ID),
+                                f"🔔 *Access Request*\n\n"
+                                f"User: {display}\n"
+                                f"ID: `{chat_id}`",
+                                reply_markup={"inline_keyboard": [[
+                                    {"text": "✅ Approve", "callback_data": f"approve:{chat_id}"},
+                                    {"text": "❌ Deny", "callback_data": f"deny:{chat_id}"},
+                                ]]})
+                        log.info(f"[{chat_id}] Access requested by {display}")
                     continue
 
                 # Handle file uploads (zip for website deployment)
@@ -1524,15 +1731,27 @@ def run():
             elif "callback_query" in update:
                 cb = update["callback_query"]
                 chat_id = cb["message"]["chat"]["id"]
-                if str(chat_id) != str(TELEGRAM_CHAT_ID):
+                data = cb.get("data", "")
+
+                # Admin approval/deny callbacks — always allow for admin
+                if data.startswith("approve:") or data.startswith("deny:"):
+                    if str(chat_id) == ADMIN_CHAT_ID:
+                        handle_callback(cb["id"], chat_id, cb["message"]["message_id"], data)
+                    continue
+
+                if not is_authorized(chat_id):
                     continue
                 handle_callback(
                     cb["id"],
                     chat_id,
                     cb["message"]["message_id"],
-                    cb.get("data", ""),
+                    data,
                 )
 
 
 if __name__ == "__main__":
-    run()
+    try:
+        run()
+    except KeyboardInterrupt:
+        log.info("Bot stopped by user.")
+        print("\n  Bot stopped.")

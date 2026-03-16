@@ -27,6 +27,9 @@ browser_data/
 # Temp/debug images
 *.png
 
+# Approved users list
+approved_users.json
+
 # Claude Code instructions (local only)
 CLAUDE.md
 

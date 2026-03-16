@@ -234,8 +234,25 @@ class GoDaddyEmailBot:
         domain_input.clear()
         domain_input.fill(domain)
         page.wait_for_timeout(1000)
-        page.locator('button:has-text("Continue")').first.click()
+
+        # Wait for Continue button to stop showing "Loading..."
+        continue_btn = page.locator('button:has-text("Continue")').first
+        continue_btn.wait_for(state="visible", timeout=15000)
+        for _ in range(40):  # up to ~20 seconds
+            btn_text = continue_btn.inner_text()
+            if "loading" not in btn_text.lower():
+                break
+            page.wait_for_timeout(500)
+        continue_btn.click()
+
+        # Wait for the next page (email form) to load — up to 20 seconds
         page.wait_for_timeout(5000)
+        for _ in range(30):  # up to ~15 more seconds
+            if page.locator('text="Create single email"').first.is_visible():
+                break
+            if page.locator('text="Username"').first.is_visible():
+                break
+            page.wait_for_timeout(500)
         log.info(f"Step 3: Entered domain '{domain}' and clicked Continue")
 
         # ── Step 4: Switch to "Create single email" tab ──
@@ -412,6 +429,22 @@ class GoDaddyEmailBot:
                 log.warning(f"Expiration index {expiration_idx} out of range ({len(options)} options)")
         else:
             log.info("Single expiration date — skipping dropdown selection")
+
+        # Link domains — select "Do not share"
+        try:
+            link_dropdown = page.get_by_text("Please select...").first
+            if link_dropdown.is_visible(timeout=3000):
+                link_dropdown.click()
+                page.wait_for_timeout(1000)
+                do_not_share = page.get_by_text("Do not share").last
+                do_not_share.wait_for(state="visible", timeout=5000)
+                do_not_share.click()
+                page.wait_for_timeout(1000)
+                log.info("Selected 'Do not share' for Link domains")
+            else:
+                log.info("Link domains dropdown not found — skipping")
+        except Exception as e:
+            log.warning(f"Could not select 'Do not share' for Link domains: {e}")
 
         # Administrator permissions (radio buttons)
         if admin:
