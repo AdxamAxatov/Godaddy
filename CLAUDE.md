@@ -64,9 +64,11 @@ All commands work standalone (bot asks for input) or with an argument (e.g. `/bu
 
 ### website_generator.py
 
-Generates unique trucking company websites from templates:
-- `generate_website(info)` — produces a zip with `index.html` + placeholder images. Randomizes color scheme (10 options), font pair (12 options), hero taglines, section content
+Two generation modes:
+- `generate_website_from_template(info)` — **primary** (used by `/generate`): picks a random template from `templates/`, does find-and-replace of company name/domain/email/address/city, swaps template images for random stock photos. Falls back to `generate_website()` if no templates exist
+- `generate_website(info)` — **fallback**: builds HTML from scratch with f-string templating. Randomizes color scheme (10 options), font pair (12 options), hero taglines, section content
 - `generate_job_description(info)` — produces Indeed-ready markdown with randomized section titles
+- Template originals are defined in `_TEMPLATE_ORIGINALS` dict (maps template dir name → original company info for replacement)
 - Sections: Nav → Hero → How We Work → About/Coverage → Careers (highlights only) → Contact → Footer
 - All CSS inline, responsive, scroll animations, hamburger menu
 
@@ -77,6 +79,7 @@ Logger name: `automation`. INFO to console (stdout), DEBUG to `logs/automation.l
 ## Supporting Directories
 
 - `assets/stock_images/` — stock photos bundled into generated websites by `website_generator.py`
+- `templates/` — real website HTML templates (one folder per template, each with `index.html`). Used by `generate_website_from_template()` for find-and-replace generation
 - `flow/` — reference screenshots documenting the GoDaddy Email & Office manual flow (not used by code)
 - `Websites/` — example generated website outputs (not used by code)
 - `browser_data/account_N/` — persistent Chrome profiles for each GoDaddy login account
@@ -91,11 +94,12 @@ All config loaded from `.env` via custom `_load_env()` (no python-dotenv). Key g
 
 ### Multi-account support
 
-cPanel and GoDaddy login accounts are numbered with `_1`, `_2`, etc. suffixes in `.env`:
-- `CPANEL_URL_1`, `CPANEL_USERNAME_1`, `CPANEL_PASSWORD_1`, `CPANEL_LABEL_1` (up to `_9`)
-- `GODADDY_EMAIL_1`, `GODADDY_PASSWORD_1` (up to `_9`)
+All account types are numbered with `_1`, `_2`, etc. suffixes in `.env` (up to `_9`):
+- **GoDaddy API**: `GODADDY_API_KEY_1`, `GODADDY_API_SECRET_1`, `GODADDY_API_LABEL_1`, plus per-account registrant contact (`REGISTRANT_FIRST_NAME_1`, etc.) → `GODADDY_API_ACCOUNTS` list
+- **cPanel**: `CPANEL_URL_1`, `CPANEL_USERNAME_1`, `CPANEL_PASSWORD_1`, `CPANEL_LABEL_1` → `CPANEL_ACCOUNTS` list
+- **GoDaddy Login** (browser): `GODADDY_EMAIL_1`, `GODADDY_PASSWORD_1` → `GODADDY_ACCOUNTS` list
 
-Each GoDaddy account gets its own browser profile (`browser_data/account_1/`, `account_2/`, etc.) so sessions don't conflict. When multiple accounts exist, the bot shows an inline keyboard picker. With a single account, selection is skipped.
+Fallback: if no numbered vars found, loads legacy single-var config (e.g. `GODADDY_API_KEY`). Each GoDaddy login account gets its own browser profile (`browser_data/account_1/`, `account_2/`, etc.) so sessions don't conflict. When multiple accounts exist, the bot shows an inline keyboard picker. With a single account, selection is skipped.
 
 ## API Gotchas
 

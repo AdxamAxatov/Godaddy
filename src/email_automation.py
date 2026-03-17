@@ -47,6 +47,35 @@ class GoDaddyEmailBot:
         for _ in range(3):
             found = False
 
+            # Check for "Create an email account" popup (has Cancel link + X close button)
+            try:
+                create_popup = page.locator('text="Create an email account"').first
+                if create_popup.is_visible(timeout=500):
+                    # Click Cancel link inside the popup — most reliable
+                    cancel = page.locator('text="Cancel"').first
+                    if cancel.is_visible(timeout=1000):
+                        cancel.click(force=True)
+                        page.wait_for_timeout(1000)
+                        dismissed = True
+                        log.debug("Dismissed 'Create an email account' popup via Cancel")
+                        continue
+                    # Fallback: click the X button via JS
+                    page.evaluate("""() => {
+                        const els = document.querySelectorAll('*');
+                        for (const el of els) {
+                            if (el.textContent.trim() === '×' || el.textContent.trim() === '✕' || el.getAttribute('aria-label')?.includes('lose')) {
+                                const rect = el.getBoundingClientRect();
+                                if (rect.width > 0 && rect.height > 0) { el.click(); return; }
+                            }
+                        }
+                    }""")
+                    page.wait_for_timeout(1000)
+                    dismissed = True
+                    log.debug("Dismissed 'Create an email account' popup via X button")
+                    continue
+            except Exception:
+                pass
+
             # JS approach: find any visible modal/dialog close buttons
             try:
                 found = page.evaluate("""() => {
@@ -64,8 +93,8 @@ class GoDaddyEmailBot:
                             return true;
                         }
                     }
-                    // Look for Cancel text inside modals
-                    const all = document.querySelectorAll('[class*="modal"] a, [role="dialog"] a, [role="dialog"] button');
+                    // Look for Cancel text inside modals/popups
+                    const all = document.querySelectorAll('[class*="modal"] a, [role="dialog"] a, [role="dialog"] button, [class*="popup"] a, [class*="popup"] button');
                     for (const el of all) {
                         if (el.textContent.trim() === 'Cancel') {
                             el.click();
@@ -180,15 +209,22 @@ class GoDaddyEmailBot:
         page = self._page
 
         # ── Step 1: Go to Overview ──
-        page.goto("https://productivity.godaddy.com/#/")
-        page.wait_for_load_state("domcontentloaded")
-        page.wait_for_timeout(3000)
+        for attempt in range(3):
+            try:
+                page.goto("https://productivity.godaddy.com/#/", wait_until="domcontentloaded")
+                page.wait_for_timeout(3000)
+                break
+            except Exception as e:
+                if attempt < 2:
+                    log.warning(f"Navigation interrupted (attempt {attempt + 1}), retrying: {e}")
+                    page.wait_for_timeout(2000)
+                else:
+                    raise
 
         # Handle SSO redirect if session expired
         if self._ensure_logged_in():
             log.info("Was redirected to SSO — navigating back to Overview")
-            page.goto("https://productivity.godaddy.com/#/")
-            page.wait_for_load_state("domcontentloaded")
+            page.goto("https://productivity.godaddy.com/#/", wait_until="domcontentloaded")
             page.wait_for_timeout(3000)
         else:
             log.info("Already logged in")
@@ -334,72 +370,80 @@ class GoDaddyEmailBot:
         """Scrape available expiration dates from the dropdown or static text."""
         page = self._page
 
-        # Check if there's only one expiration date (no dropdown, just static text)
+        # First, try to find and open the dropdown
+        try:
+            dropdown = self._find_expiration_dropdown()
+        except RuntimeError:
+            dropdown = None
+
+        if dropdown:
+            # Dropdown exists — always open it to get the real count
+            dropdown.click()
+            page.wait_for_timeout(5000)
+
+            try:
+                page.screenshot(path=f"{_LOGS_DIR}/debug_expiration_open.png")
+            except Exception:
+                pass
+
+            # Scrape options via JS — catches all items regardless of scroll/visibility
+            dates = page.evaluate("""() => {
+                const dates = [];
+                // First try: items with name="expirationDateDropDown"
+                const byName = document.querySelectorAll('[name="expirationDateDropDown"]');
+                for (const el of byName) {
+                    const text = el.textContent.trim();
+                    if (text && text.includes('Available')) dates.push(text);
+                }
+                if (dates.length > 0) return dates;
+                // Fallback: any role="option" or dropdown-item with "Available"
+                const fallback = document.querySelectorAll('[role="option"], .dropdown-item, [class*="dropdown"] li, [class*="select"] li');
+                for (const el of fallback) {
+                    const text = el.textContent.trim();
+                    if (text && text.includes('Available')) dates.push(text);
+                }
+                return dates;
+            }""")
+
+            # Close the dropdown
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(500)
+
+            log.info(f"Expiration dates: {dates}")
+            self._expiration_dates = dates
+
+            if len(dates) <= 1:
+                self._single_expiration = True
+                log.info(f"Only {len(dates)} expiration date(s) — will skip dropdown in fill_form")
+            else:
+                self._single_expiration = False
+
+            if not dates:
+                try:
+                    page.screenshot(path=f"{_LOGS_DIR}/debug_expiration_empty.png")
+                    log.info("Debug screenshot saved to debug_expiration_empty.png")
+                except Exception:
+                    pass
+                raise RuntimeError("Dropdown opened but no expiration options found — check logs/debug_expiration_open.png")
+            return dates
+
+        # No dropdown — check for static text
         try:
             label = page.locator('text="Renewal/Expiration date"').first
             if label.is_visible(timeout=3000):
-                # Get the sibling/nearby text that contains the date
                 parent = page.locator('text="Renewal/Expiration date" >> ..').first
                 parent_text = parent.text_content().strip()
-                # Extract the "Available" part
                 if "Available" in parent_text:
-                    # Remove the label text itself
                     date_text = parent_text.replace("Renewal/Expiration date", "").strip()
                     if date_text:
-                        # Check if there's a dropdown — try finding one
-                        try:
-                            dropdown = self._find_expiration_dropdown()
-                        except RuntimeError:
-                            dropdown = None
-
-                        if not dropdown:
-                            # No dropdown — single value, return it directly
-                            log.info(f"Single expiration date (no dropdown): {date_text}")
-                            self._single_expiration = True
-                            return [date_text]
+                        log.info(f"Single expiration date (no dropdown): {date_text}")
+                        self._single_expiration = True
+                        self._expiration_dates = [date_text]
+                        return [date_text]
         except Exception:
             pass
 
-        self._single_expiration = False
-
-        # Multiple dates — click the dropdown to open it
-        dropdown = self._find_expiration_dropdown()
-        dropdown.click()
-        page.wait_for_timeout(2000)
-
-        # Take a screenshot to see what options appeared
-        try:
-            page.screenshot(path=f"{_LOGS_DIR}/debug_expiration_open.png")
-        except Exception:
-            pass
-
-        # Scrape options — filter to only those containing "Available" (expiration format)
-        dates = []
-        all_options = page.locator('[role="option"], [role="listbox"] [class*="option"], [class*="menu"] [class*="option"]').all()
-        if not all_options:
-            all_options = page.locator('[class*="dropdown"] li, [class*="menu"] li, [class*="select"] li').all()
-
-        for opt in all_options:
-            try:
-                text = opt.text_content().strip()
-                if text and "Available" in text:
-                    dates.append(text)
-            except Exception:
-                continue
-
-        # Close the dropdown
-        page.keyboard.press("Escape")
-        page.wait_for_timeout(500)
-
-        log.info(f"Expiration dates: {dates}")
-        if not dates:
-            try:
-                page.screenshot(path=f"{_LOGS_DIR}/debug_expiration_empty.png")
-                log.info("Debug screenshot saved to debug_expiration_empty.png")
-            except Exception:
-                pass
-            raise RuntimeError("Dropdown opened but no expiration options found — check logs/debug_expiration_open.png")
-        return dates
+        raise RuntimeError("Could not find expiration dates — no dropdown and no static text")
 
     def fill_form(self, username: str, first_name: str, last_name: str,
                   admin: bool, expiration_idx: int, password: str, notify_email: str):
@@ -413,7 +457,7 @@ class GoDaddyEmailBot:
         page.get_by_label("First name").fill(first_name)
         page.get_by_label("Last name").fill(last_name)
 
-        # Expiration date dropdown — skip if only one option (no dropdown exists)
+        # Expiration date dropdown — skip if only one option
         if not getattr(self, '_single_expiration', False):
             dropdown = self._find_expiration_dropdown()
             dropdown.click()
@@ -436,15 +480,36 @@ class GoDaddyEmailBot:
             if link_dropdown.is_visible(timeout=3000):
                 link_dropdown.click()
                 page.wait_for_timeout(1000)
-                do_not_share = page.get_by_text("Do not share").last
-                do_not_share.wait_for(state="visible", timeout=5000)
-                do_not_share.click()
-                page.wait_for_timeout(1000)
-                log.info("Selected 'Do not share' for Link domains")
+                # The dropdown has its own scroller — use JS to find and click "Do not share"
+                clicked = page.evaluate("""() => {
+                    const items = document.querySelectorAll('[role="option"], .dropdown-item, [class*="drop-down"] *');
+                    for (const item of items) {
+                        if (item.textContent.trim() === 'Do not share') {
+                            item.scrollIntoView({block: 'center'});
+                            item.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }""")
+                if clicked:
+                    page.wait_for_timeout(1000)
+                    log.info("Selected 'Do not share' for Link domains")
+                else:
+                    log.warning("'Do not share' option not found in dropdown items")
+                    # Close the dropdown by clicking elsewhere
+                    page.locator("body").click(position={"x": 0, "y": 0})
+                    page.wait_for_timeout(500)
             else:
                 log.info("Link domains dropdown not found — skipping")
         except Exception as e:
             log.warning(f"Could not select 'Do not share' for Link domains: {e}")
+            # Make sure the dropdown is closed so it doesn't block subsequent elements
+            try:
+                page.locator("body").click(position={"x": 0, "y": 0})
+                page.wait_for_timeout(500)
+            except Exception:
+                pass
 
         # Administrator permissions (radio buttons)
         if admin:
@@ -469,16 +534,35 @@ class GoDaddyEmailBot:
         return path
 
     def submit(self):
-        """Click the Create button, then navigate back to Overview."""
-        self._page.get_by_role("button", name="Create").click()
-        self._page.wait_for_load_state("domcontentloaded")
-        self._page.wait_for_timeout(5000)
+        """Click the Create button, dismiss phone number offer, then navigate back to Overview."""
+        page = self._page
+        page.get_by_role("button", name="Create").click()
+        page.wait_for_load_state("domcontentloaded")
         log.info("Create button clicked")
 
+        # Wait for the phone number notification offer to appear (up to 20 seconds)
+        # GoDaddy often offers to notify via phone after email creation
+        dismissed_offer = False
+        for _ in range(40):
+            page.wait_for_timeout(500)
+            try:
+                no_thanks = page.locator('button:has-text("No, thank you"), button:has-text("No thank you"), a:has-text("No, thank you"), a:has-text("No thank you")').first
+                if no_thanks.is_visible(timeout=200):
+                    no_thanks.click()
+                    page.wait_for_timeout(1000)
+                    log.info("Dismissed phone number notification offer")
+                    dismissed_offer = True
+                    break
+            except Exception:
+                continue
+
+        if not dismissed_offer:
+            log.info("Phone number offer did not appear — skipping")
+
         # Go back to Overview so browser is ready for next email
-        self._page.goto("https://productivity.godaddy.com/#/")
-        self._page.wait_for_load_state("domcontentloaded")
-        self._page.wait_for_timeout(3000)
+        page.goto("https://productivity.godaddy.com/#/")
+        page.wait_for_load_state("domcontentloaded")
+        page.wait_for_timeout(3000)
         self._dismiss_popups()
         log.info("Navigated back to Overview")
 

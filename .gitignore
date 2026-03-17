@@ -21,6 +21,9 @@ flow/
 # Website examples (internal reference)
 Websites/
 
+# Website design templates (extracted from Websites/)
+templates/
+
 # Browser profiles (persistent session cookies)
 browser_data/
 
@@ -37,3 +40,5 @@ CLAUDE.md
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+benefits.txt

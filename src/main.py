@@ -871,7 +871,7 @@ def _finish_generate(chat_id):
     tg_send(chat_id, "⏳ Generating website and job description...")
 
     try:
-        from website_generator import generate_website, generate_job_description
+        from website_generator import generate_website_from_blocks, generate_job_description
 
         # Build info with defaults for optional fields
         company = state["company_name"]
@@ -896,7 +896,7 @@ def _finish_generate(chat_id):
         }
 
         # Generate website zip
-        zip_path = generate_website(info)
+        zip_path = generate_website_from_blocks(info)
         log.info(f"Website generated: {zip_path}")
 
         # Generate job description
@@ -905,15 +905,15 @@ def _finish_generate(chat_id):
         # Send zip file
         tg_send_document(chat_id, zip_path, caption=f"🌐 *Website for* `{state['domain']}`")
 
-        # Send job description as text
-        # Split if too long for Telegram (4096 char limit)
-        if len(job_desc) <= 4000:
-            tg_send(chat_id, f"📋 *Indeed Job Description:*\n\n{job_desc}")
-        else:
-            # Send in chunks
-            tg_send(chat_id, "📋 *Indeed Job Description:*")
-            for i in range(0, len(job_desc), 4000):
-                tg_send(chat_id, job_desc[i:i+4000])
+        # Send job description as HTML file — paste directly into Indeed's editor
+        jd_path = os.path.join(tempfile.gettempdir(), f"{state['domain'].replace('.', '_')}_indeed.html")
+        with open(jd_path, "w", encoding="utf-8") as f:
+            f.write(job_desc)
+        tg_send_document(chat_id, jd_path, caption="📋 *Indeed Job Description* — open, select all, paste into Indeed")
+        try:
+            os.remove(jd_path)
+        except OSError:
+            pass
 
         # Store zip path for optional deploy — don't delete yet
         pending_deploy = {
@@ -1145,14 +1145,13 @@ def _handle_email_input(chat_id, raw_text, message_id=None):
                 tg_delete_message(chat_id, message_id)
             except Exception:
                 pass
-        default_email = GODADDY_API_ACCOUNTS[0]["registrant"]["email"] if GODADDY_API_ACCOUNTS else ""
         tg_send(chat_id,
-                f"📬 Send account info to which email?\n\n"
-                f"Default: `{default_email}`",
+                "📬 Send account info to which email?",
                 reply_markup={
-                    "inline_keyboard": [[
-                        {"text": f"Use {default_email}", "callback_data": "email_notify:default"},
-                    ]]
+                    "inline_keyboard": [
+                        [{"text": "smfleet02@gmail.com", "callback_data": "email_notify:smfleet02@gmail.com"}],
+                        [{"text": "phillhr57@gmail.com", "callback_data": "email_notify:phillhr57@gmail.com"}],
+                    ]
                 })
 
     elif step == "awaiting_notify_email":
@@ -1164,19 +1163,39 @@ def _launch_email_browser(chat_id):
     """Open browser, login, navigate to form, scrape expiration dates."""
     state = pending_email[chat_id]
     domain = state["domain"]
+    account_idx = state.get("account_idx", 0)
 
-    account = GODADDY_ACCOUNTS[state.get("account_idx", 0)]
-    tg_send(chat_id, f"⏳ Opening browser and navigating to GoDaddy ({account['email']})...")
+    account = GODADDY_ACCOUNTS[account_idx]
 
     try:
         from email_automation import GoDaddyEmailBot
-        bot = GoDaddyEmailBot(
-            email=account["email"],
-            password=account["password"],
-            account_idx=state.get("account_idx", 0),
-            headless=False,
-        )
-        bot.open()
+
+        # Reuse existing browser if it's open for the same account
+        existing = active_browser.get(chat_id)
+        if existing and getattr(existing, 'account_idx', None) == account_idx and existing._page:
+            bot = existing
+            active_browser.pop(chat_id)
+            tg_send(chat_id, f"⏳ Reusing open browser, navigating to email form...")
+            log.info(f"Reusing existing browser for account {account_idx}")
+        else:
+            # Close old browser if it's a different account or stale
+            if existing:
+                try:
+                    existing.close()
+                except Exception:
+                    pass
+                active_browser.pop(chat_id, None)
+                log.info("Closed previous browser (different account or stale)")
+
+            tg_send(chat_id, f"⏳ Opening browser and navigating to GoDaddy ({account['email']})...")
+            bot = GoDaddyEmailBot(
+                email=account["email"],
+                password=account["password"],
+                account_idx=account_idx,
+                headless=False,
+            )
+            bot.open()
+
         bot.go_to_create_email(domain)
 
         dates = bot.get_expiration_dates()
@@ -1473,8 +1492,7 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
         state = pending_email.get(chat_id)
         if not state:
             return
-        if data == "email_notify:default":
-            state["notify_email"] = GODADDY_API_ACCOUNTS[0]["registrant"]["email"] if GODADDY_API_ACCOUNTS else ""
+        state["notify_email"] = data.split(":", 1)[1]
         tg_edit_message(chat_id, message_id, f"Notify: {state['notify_email']}")
         _launch_email_browser(chat_id)
         return
