@@ -23,7 +23,7 @@ Three files in `src/`:
 
 - **`src/main.py`** — Telegram bot, GoDaddy API, cPanel API, and all bot flow logic (state machines for buy, setup, email, generate)
 - **`src/email_automation.py`** — `GoDaddyEmailBot` class: Playwright browser automation for GoDaddy Email & Office email creation
-- **`src/website_generator.py`** — Website HTML generator + Indeed job description generator for trucking companies
+- **`src/website_generator.py`** — Block-based website HTML generator + Indeed job description generator for trucking companies
 
 ### main.py sections
 
@@ -31,11 +31,11 @@ Three files in `src/`:
 - **GoDaddy API** — `check_domain_availability()` (GET `/v1/domains/available`), `purchase_domain()` (POST `/v1/domains/purchase`)
 - **cPanel API** — `cpanel_create_domain()` (API2 AddonDomain), `cpanel_upload_file()` (UAPI Fileman), `cpanel_extract_file()` and `cpanel_delete_file()` (API2 Fileman::fileop)
 - **Bot Handlers** — `handle_message()` routes text input, `handle_callback()` routes inline button presses, `handle_document()` processes zip uploads
-- **Buy Flow** — `pending_buy` dict: ask domain → check availability → show price → purchase
-- **Email Flow** — `pending_email` dict: multi-step state machine (username → name → admin → password → notify email → browser launch → expiration → confirm → submit). Password messages auto-deleted for security
+- **Buy Flow** — `pending_buy` dict: ask domain → check availability → show price → purchase. Supports multi-account picker
+- **Email Flow** — `pending_email` dict: multi-step state machine (username → name → admin → password → notify email → browser launch → expiration (auto-skipped if single date) → confirm → submit). Password messages auto-deleted for security
 - **Website Flow** — `pending_website_domain` dict: pick cPanel account → create domain → wait for zip → upload → extract → delete zip
-- **Generate Flow** — `pending_generate` dict: collect company info step by step → generate HTML + job description → send zip + text to Telegram
-- **Browser Management** — `active_browser` dict: keeps browser open after email creation, `/close` command to close it
+- **Generate Flow** — `pending_generate` dict: collect company info step by step → generate HTML zip + Indeed HTML file → send both to Telegram
+- **Browser Management** — `active_browser` dict: keeps browser open after email creation; reused on next `/email` if same account. `/close` command closes it
 - **Main Loop** — `run()` flushes stale updates on startup, sends startup message, then polls Telegram
 
 ### Telegram bot commands
@@ -56,21 +56,37 @@ All commands work standalone (bot asks for input) or with an argument (e.g. `/bu
 
 `GoDaddyEmailBot` class drives GoDaddy's Email & Office web UI following the real manual flow:
 1. `open()` — launches real Chrome with per-account persistent profile (`browser_data/account_N/`)
-2. `go_to_create_email(domain)` — follows manual flow: Overview → Set up accounts → Get Started (M365) → enter domain → Continue → Create single email tab. Handles SSO login if session expired
-3. `get_expiration_dates()` — scrapes expiration dropdown (handles both dropdown and single-value cases)
-4. `fill_form()` — fills all form fields, selects expiration date
-5. `submit()` — clicks Create button, navigates back to Overview
+2. `go_to_create_email(domain)` — follows manual flow: Overview → Set up accounts → Get Started (M365) → enter domain → Continue → Create single email tab. Retries navigation up to 3 times if interrupted by GoDaddy redirects. Handles SSO login if session expired
+3. `get_expiration_dates()` — opens the dropdown (if it exists) and uses JS to read all options regardless of scroll/visibility. If only 1 date found, sets `_single_expiration = True` so `fill_form()` skips it. If no dropdown, reads static text
+4. `fill_form()` — fills all form fields. Selects "Do not share" for Link domains via JS click (dropdown has its own scroller). Skips expiration dropdown if `_single_expiration`
+5. `submit()` — clicks Create, then polls up to 20 seconds for a "No, thank you" phone notification offer and dismisses it, then navigates back to Overview
 6. `close()` — cleans up browser resources
+
+**`_dismiss_popups()`** handles: "Create an email account" modal (clicks Cancel with `force=True`), generic modal close buttons, recommendation overlays. Runs up to 3 rounds.
 
 ### website_generator.py
 
-Two generation modes:
-- `generate_website_from_template(info)` — **primary** (used by `/generate`): picks a random template from `templates/`, does find-and-replace of company name/domain/email/address/city, swaps template images for random stock photos. Falls back to `generate_website()` if no templates exist
-- `generate_website(info)` — **fallback**: builds HTML from scratch with f-string templating. Randomizes color scheme (10 options), font pair (12 options), hero taglines, section content
-- `generate_job_description(info)` — produces Indeed-ready markdown with randomized section titles
-- Template originals are defined in `_TEMPLATE_ORIGINALS` dict (maps template dir name → original company info for replacement)
-- Sections: Nav → Hero → How We Work → About/Coverage → Careers (highlights only) → Contact → Footer
+**Block-based generation** (`generate_website_from_blocks`) — the primary function called by `/generate`:
+- Randomly picks one variant from each section pool: 5 hero × 5 process × 5 about × 5 careers × 4 contact = 2,500 layout combinations
+- Combined with 10 color schemes × 12 font pairs = **300,000+ unique combinations**
 - All CSS inline, responsive, scroll animations, hamburger menu
+- All section blocks use CSS variables so color scheme fully controls the look
+- Careers blocks always use `<div class="perk">TEXT</div>` for benefit items — consistent across all variants
+- `generate_website(info)` — original scratch-built generator kept as reference/fallback (not called by bot)
+
+**`generate_job_description(info)`** — outputs HTML fragments (not markdown) for pasting directly into Indeed's rich text editor:
+- Randomly picks tone: `direct`, `professional`, or `conversational`
+- Randomly shuffles section order (intro always first, EEO always last)
+- 30 intro paragraph variations, 3 tone-matched duties/requirements pools
+- Pay section presented 3 different ways
+- Schedule section presented 3 different ways
+- Randomly includes 0–2 optional sections: "Why Drivers Stay", "About {company}", "Apply Today" CTA
+- 5 EEO statement variations
+- Output is `<p>`, `<b>`, `<ul>/<li>`, `<i>` tags — paste into Indeed editor and it renders formatted
+
+## Notification Email
+
+The "Send account info to" field during `/email` flow shows two hardcoded buttons: `smfleet02@gmail.com` and `phillhr57@gmail.com`. User can also type a custom email. To change these, edit the `_handle_email_input` function in `main.py` where `step == "awaiting_password"`.
 
 ## Logging
 
@@ -78,10 +94,8 @@ Logger name: `automation`. INFO to console (stdout), DEBUG to `logs/automation.l
 
 ## Supporting Directories
 
-- `assets/stock_images/` — stock photos bundled into generated websites by `website_generator.py`
-- `templates/` — real website HTML templates (one folder per template, each with `index.html`). Used by `generate_website_from_template()` for find-and-replace generation
+- `assets/stock_images/` — stock photos (`hero_*.jpg`, `about_*.jpg`, `coverage_*.jpg`) bundled into generated websites
 - `flow/` — reference screenshots documenting the GoDaddy Email & Office manual flow (not used by code)
-- `Websites/` — example generated website outputs (not used by code)
 - `browser_data/account_N/` — persistent Chrome profiles for each GoDaddy login account
 
 ## Configuration
@@ -115,12 +129,14 @@ Fallback: if no numbered vars found, loads legacy single-var config (e.g. `GODAD
 
 - Bot follows the real manual flow (Overview → Set up accounts → M365 → domain → single email tab) to avoid suspicious direct URL navigation
 - GoDaddy detects Playwright's bundled Chromium — must use `channel="chrome"` with real Chrome
-- Recommendation popups/modals can appear — `_dismiss_popups()` handles these
-- SSO login is two-step (username then password) with unpredictable redirect timing — `_ensure_logged_in()` checks and handles it
 - **Never use `wait_for_load_state("networkidle")`** — GoDaddy's SPA never stops making network requests. Use `"domcontentloaded"` + `wait_for_timeout()` instead
-- Per-account persistent profiles (`browser_data/account_N/`) keep sessions alive across restarts
-- Browser runs with `headless=False` — GoDaddy's anti-bot detection is more aggressive against headless browsers
-- When only one expiration date exists, there's no dropdown — just static text. `get_expiration_dates()` handles both cases
+- Initial `page.goto()` in `go_to_create_email()` retries up to 3 times — GoDaddy sometimes redirects mid-navigation which causes Playwright to throw a navigation conflict error
+- "Link domains" dropdown has its own internal scroller — selecting "Do not share" must be done via JS (`document.querySelectorAll` + `.click()`) not Playwright locators
+- After clicking Create, bot polls 20 seconds for a phone number notification offer ("No, thank you") before navigating back to Overview
+- If a second `/email` is started while a browser is still open (user chose "Keep Open"), the existing browser is reused if it's the same account — avoids Playwright Sync API conflict from launching two instances
+- Expiration date: if only 1 date exists, bot auto-selects it and skips asking the user
+- Expiration dropdown options are read via JS (`[name="expirationDateDropDown"]`) after a 5-second wait — reads all DOM items regardless of scroll position
+- `_dismiss_popups()` runs up to 3 rounds and handles: "Create an email account" modal, generic close/X buttons, Cancel links
 
 ## Notes
 

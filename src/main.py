@@ -127,6 +127,10 @@ for _i in range(1, 10):
     else:
         break
 
+# ── Browser settings ──────────────────────────────────
+EMAIL_HEADLESS  = os.environ.get("EMAIL_HEADLESS",  "false").lower() == "true"
+INDEED_HEADLESS = os.environ.get("INDEED_HEADLESS", "false").lower() == "true"
+
 # ── Logging ───────────────────────────────────────────
 _PROJECT_ROOT = Path(__file__).parent.parent
 LOG_FILE = str(_PROJECT_ROOT / "logs" / "automation.log")
@@ -304,7 +308,7 @@ def check_indeed_company(company_name: str) -> str | None:
         context = pw.chromium.launch_persistent_context(
             user_data_dir=profile_dir,
             channel="chrome",
-            headless=False,
+            headless=INDEED_HEADLESS,
             args=["--disable-blink-features=AutomationControlled"],
             viewport={"width": 1280, "height": 900},
         )
@@ -1192,7 +1196,7 @@ def _launch_email_browser(chat_id):
                 email=account["email"],
                 password=account["password"],
                 account_idx=account_idx,
-                headless=False,
+                headless=EMAIL_HEADLESS,
             )
             bot.open()
 
@@ -1201,16 +1205,22 @@ def _launch_email_browser(chat_id):
         dates = bot.get_expiration_dates()
         state["browser_bot"] = bot
         state["expiration_dates"] = dates
-        state["step"] = "awaiting_expiration"
 
-        # Show dates as buttons
-        buttons = []
-        for i, date in enumerate(dates):
-            buttons.append([{"text": date, "callback_data": f"email_exp:{i}"}])
-
-        tg_send(chat_id,
-                "📅 Choose an expiration/renewal date:",
-                reply_markup={"inline_keyboard": buttons})
+        if len(dates) == 1:
+            # Only one option — auto-select it, skip asking user
+            state["expiration_idx"] = 0
+            state["expiration_text"] = dates[0]
+            log.info(f"Auto-selected single expiration date: {dates[0]}")
+            _fill_and_confirm(chat_id, None)
+        else:
+            # Multiple options — show picker
+            state["step"] = "awaiting_expiration"
+            buttons = []
+            for i, date in enumerate(dates):
+                buttons.append([{"text": date, "callback_data": f"email_exp:{i}"}])
+            tg_send(chat_id,
+                    "📅 Choose an expiration/renewal date:",
+                    reply_markup={"inline_keyboard": buttons})
 
     except Exception as e:
         log.error(f"Email browser automation failed: {e}")
@@ -1225,7 +1235,10 @@ def _fill_and_confirm(chat_id, message_id):
     state = pending_email[chat_id]
     bot = state["browser_bot"]
 
-    tg_edit_message(chat_id, message_id, f"📅 Expiration: {state['expiration_text']}")
+    if message_id:
+        tg_edit_message(chat_id, message_id, f"📅 Expiration: {state['expiration_text']}")
+    else:
+        tg_send(chat_id, f"📅 Expiration: {state['expiration_text']} (auto-selected)")
     tg_send(chat_id, "⏳ Filling in the form...")
 
     try:

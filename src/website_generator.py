@@ -1396,7 +1396,7 @@ def generate_website_from_template(info: dict) -> str:
 
 
 def generate_job_description(info: dict) -> str:
-    """Generate a unique Indeed job description as markdown text."""
+    """Generate a unique Indeed job description as HTML fragments for rich-text pasting."""
     company = info["company_name"]
     city_state = info["city_state"]
     job_title = info["job_title"]
@@ -1405,7 +1405,10 @@ def generate_job_description(info: dict) -> str:
     perks = info.get("perks", [])
     min_exp = info.get("min_experience", "6 months")
 
-    # 30 section title styles
+    # ── Tone ─────────────────────────────────────────────────────────────────
+    tone = random.choice(["direct", "professional", "conversational"])
+
+    # ── 30 section title styles ───────────────────────────────────────────────
     section_styles = [
         {"duties": "Day-to-Day", "reqs": "What You Bring", "pay": "Your Pay & Benefits", "schedule": "Home Time & Routes"},
         {"duties": "The Work", "reqs": "What We Need", "pay": "Compensation", "schedule": "Schedule & Routes"},
@@ -1439,7 +1442,7 @@ def generate_job_description(info: dict) -> str:
         {"duties": "Typical Workload", "reqs": "What You Need to Have", "pay": "Full Benefits Rundown", "schedule": "Route & Home Pattern"},
     ]
 
-    # 30 intro paragraphs
+    # ── 30 intro paragraphs ───────────────────────────────────────────────────
     intros = [
         f"{company} is looking for a dependable driver out of {city_state}. We run freight across all 48 states with consistent miles and a dispatch team that keeps things moving. If you want steady work, fair pay, and a carrier that respects your time — keep reading.",
         f"We need another solid driver at {company}. Based out of {city_state}, we haul dry van freight across the lower 48 with no games and no gimmicks. Good pay, real home time, and a team that has your back.",
@@ -1473,120 +1476,243 @@ def generate_job_description(info: dict) -> str:
         f"CDL-A drivers wanted at {company}. We haul freight across all 48 states from {city_state} with weekly pay, real benefits, and a team that has your back every mile.",
     ]
 
-    # 30 duties/responsibilities variations
-    duties_sets = [
-        ["Operate a company truck on OTR routes across the lower 48 states",
-         "Pick up and deliver freight safely and on schedule",
-         "Complete pre-trip and post-trip inspections per DOT regulations",
-         "Communicate with dispatch for load assignments and route updates",
-         "Maintain accurate logs and comply with all FMCSA/DOT requirements",
-         "Handle all freight as no-touch"],
-        ["Drive company equipment on over-the-road routes throughout the continental U.S.",
-         "Make timely pickups and deliveries while maintaining a professional standard",
-         "Perform thorough vehicle inspections before and after each trip",
-         "Stay in regular contact with dispatch regarding load status and ETAs",
-         "Keep electronic logs accurate and up to date per federal regulations",
-         "Manage no-touch dry van freight from origin to destination"],
-        ["Haul dry van freight on long-distance routes across 48 states",
-         "Execute safe, on-time pickups and deliveries for every load",
-         "Run full pre-trip and post-trip inspections in compliance with DOT",
-         "Coordinate with dispatch on routing, load details, and schedule changes",
-         "Maintain all required documentation and logs per FMCSA guidelines",
-         "Ensure all cargo is handled with care — no-touch freight"],
-        ["Transport goods across the country on OTR routes using company equipment",
-         "Deliver freight on time while prioritizing safety at every stop",
-         "Conduct daily vehicle inspections as required by DOT regulations",
-         "Work closely with dispatch to stay on schedule and adjust routes as needed",
-         "Keep all driving logs current and compliant with federal requirements",
-         "Handle freight professionally — all loads are no-touch"],
-        ["Run OTR routes covering the lower 48 states in a company truck",
-         "Ensure all pickups and deliveries happen safely and on time",
-         "Complete required vehicle inspections before hitting the road and after each haul",
-         "Maintain open communication with dispatch for assignments and updates",
-         "Stay compliant with FMCSA hours-of-service rules and log requirements",
-         "Manage no-touch freight with professionalism and care"],
-        ["Operate over-the-road on assigned routes across the United States",
-         "Pick up loads and deliver them within the scheduled timeframe",
-         "Inspect your vehicle daily per DOT pre-trip and post-trip requirements",
-         "Check in with dispatch regularly for load assignments and routing changes",
-         "Maintain accurate electronic logs in compliance with federal law",
-         "All freight is no-touch — you drive, we handle the rest"],
-        ["Drive a company-assigned truck on nationwide OTR routes",
-         "Handle freight pickups and deliveries on schedule, every time",
-         "Conduct thorough inspections on your vehicle before and after each trip",
-         "Communicate proactively with dispatch about load progress and any issues",
-         "Ensure all hours-of-service logs are accurate and compliant",
-         "Freight is strictly no-touch — focus on driving safely"],
-        ["Move dry van freight across all 48 states on company equipment",
-         "Arrive on time for pickups and deliver on schedule without exception",
-         "Run daily vehicle inspections per DOT standards",
-         "Keep dispatch informed on your location, load status, and any delays",
-         "Log your hours accurately using electronic logging devices",
-         "Handle all loads as no-touch freight"],
-        ["Take the wheel on OTR routes covering the continental U.S.",
-         "Make every pickup and delivery count — safely and on time",
-         "Inspect your truck thoroughly before departure and after arrival",
-         "Stay connected with dispatch for real-time load management",
-         "Comply with all FMCSA regulations including HOS and logging requirements",
-         "No-touch freight only — your job is to drive"],
-        ["Haul loads coast to coast on assigned OTR routes",
-         "Deliver freight to its destination safely and within the agreed timeline",
-         "Perform detailed vehicle inspections as part of your daily routine",
-         "Coordinate with dispatch on scheduling, routing, and load specifics",
-         "Keep electronic logs accurate and maintain full regulatory compliance",
-         "Handle no-touch freight with the professionalism it deserves"],
+    # ── Duties pools (one per tone, 6 items each — drop 1-2 randomly) ─────────
+    duties_pool = {
+        "direct": [
+            "Drive OTR. Cover all 48 states. Stay on schedule.",
+            "Pick up loads and deliver them — safely, on time, every run.",
+            "Pre-trip and post-trip inspections. Every single day. No exceptions.",
+            "Check in with dispatch. Keep them posted. Don't go dark.",
+            "Keep your ELD logs clean and current. Federal law, not optional.",
+            "No-touch freight. Your only job is getting it there in one piece.",
+            "Report any equipment issues immediately — don't nurse a sick truck down the road.",
+            "Follow load instructions to the letter. Pickups, deliveries, paperwork.",
+        ],
+        "professional": [
+            f"Operate a company-assigned Class A vehicle on over-the-road routes throughout the continental United States",
+            "Execute safe, timely freight pickups and deliveries in accordance with customer requirements and company standards",
+            "Conduct thorough pre-trip and post-trip vehicle inspections as mandated by DOT regulations",
+            "Maintain consistent communication with the dispatch team regarding load status, ETAs, and any route adjustments",
+            "Ensure full compliance with FMCSA Hours of Service rules and maintain accurate electronic logs at all times",
+            "Handle no-touch dry van freight with care and professionalism from origin to final destination",
+            "Document and report all equipment defects, incidents, or service delays in a timely and accurate manner",
+            "Adhere to all federal, state, and local transportation regulations throughout each assignment",
+        ],
+        "conversational": [
+            "You'll be running OTR across the lower 48 — we've got freight everywhere so the miles stay consistent",
+            "Pick up your loads, deliver them on time, treat the customer's dock like your own — that's the standard",
+            "Do your pre-trip and post-trip every day — it protects you and the equipment, no shortcuts",
+            "Stay in touch with your dispatcher — they're in your corner and communication keeps everyone moving",
+            "Keep your ELD logs accurate — we run a clean operation and expect the same from our drivers",
+            "It's all no-touch freight — back in, drop and hook or live unload depending on the customer, you stay in the cab",
+            "If something's wrong with your truck, speak up — we'd rather fix it in a shop than on the side of I-80",
+            "Follow load-specific instructions when they come up — sometimes there's a window, a contact name, or a special procedure",
+        ],
+    }
+
+    # ── Requirements pools (one per tone) ────────────────────────────────────
+    # Optional items (age, work auth) sometimes included
+    reqs_pool = {
+        "direct": {
+            "core": [
+                f"CDL-A. Valid. No exceptions.",
+                f"{min_exp} OTR experience, minimum.",
+                "Clean MVR — no majors in the last 3 years.",
+                "Current DOT medical card.",
+                "Pass the drug screen and background check.",
+            ],
+            "optional": [
+                "21 or older.",
+                "Must be authorized to work in the U.S.",
+                "No SAP drivers. Must be fully cleared.",
+            ],
+        },
+        "professional": {
+            "core": [
+                f"Valid Class A Commercial Driver's License (CDL-A)",
+                f"Minimum of {min_exp} verifiable over-the-road driving experience",
+                "Clean driving record — no major violations within the past 36 months",
+                "Current DOT medical examiner's certificate",
+                "Ability to successfully complete pre-employment drug screening and background verification",
+            ],
+            "optional": [
+                "Must be 21 years of age or older",
+                "Must be legally authorized to work in the United States",
+                "No active SAP program participation — must be fully return-to-duty cleared",
+            ],
+        },
+        "conversational": {
+            "core": [
+                f"You'll need a valid CDL-A — active and in good standing",
+                f"At least {min_exp} of OTR experience under your belt",
+                "A clean MVR — no DUIs, reckless driving, or major violations in the past 3 years",
+                "Current DOT physical on file",
+                "You'll need to pass a drug screen and background check before you start",
+            ],
+            "optional": [
+                "Must be 21+ — that's federal, not our rule",
+                "You need to be legally allowed to work in the U.S.",
+                "If you've been through SAP, you'll need to be fully cleared before applying",
+            ],
+        },
+    }
+
+    # ── "Why Drivers Stay" culture bullets ───────────────────────────────────
+    culture_bullets = [
+        f"Dispatch team that picks up the phone and actually helps",
+        f"Freight that keeps moving — no sitting at the yard waiting for loads",
+        f"Equipment that's maintained — we don't ask you to drive junk",
+        f"A team that treats drivers like the professionals they are",
+        f"Consistent lanes so you know what to expect week to week",
+        f"A safety culture that's real, not just a poster on the wall",
+        f"Direct deposit every Friday without fail",
+        f"No micromanaging — do your job, get your miles, go home",
+        f"Recruiters who are straight with you from day one",
+        f"A company that's been around long enough to know what drivers need",
     ]
 
-    # 30 requirements variations
-    reqs_sets = [
-        [f"Valid Class A CDL", f"Minimum {min_exp} of OTR experience", "Clean MVR — no major violations in the past 3 years",
-         "Current DOT medical card", "Must pass drug screen and background check", "Must be at least 21 years of age", "Authorized to work in the United States"],
-        [f"Class A CDL required", f"At least {min_exp} of verifiable OTR driving experience", "No major moving violations in the last 3 years",
-         "Valid DOT medical certificate", "Able to pass pre-employment drug test and background check", "21 years of age or older", "Legal authorization to work in the U.S."],
-        [f"Hold a valid CDL Class A license", f"{min_exp} or more of recent OTR experience", "Clean driving record — no serious violations within 3 years",
-         "DOT medical card must be current", "Willing to complete drug screening and background verification", "Minimum age: 21", "Must be authorized to work in the United States"],
-        [f"Active Class A CDL", f"Minimum of {min_exp} driving OTR", "MVR must be clean — no major infractions in the past 3 years",
-         "Current and valid DOT physical", "Pre-employment drug screen and background check required", "At least 21 years old", "U.S. work authorization required"],
-        [f"CDL-A license in good standing", f"At least {min_exp} behind the wheel on OTR routes", "Driving record free of major violations for the past 3 years",
-         "DOT medical card that's up to date", "Must clear drug test and background screening", "21+ years of age", "Legally eligible to work in the United States"],
-        [f"Valid CDL Class A", f"A minimum of {min_exp} of OTR driving experience", "Clean MVR with no major violations within 36 months",
-         "Current DOT medical certification", "Subject to drug screen and background check", "Must be 21 or older", "Work authorization in the U.S. is required"],
-        [f"Class A Commercial Driver's License", f"OTR experience: {min_exp} minimum", "Safe driving history — no serious violations in the last 3 years",
-         "Valid and current DOT medical card", "Drug test and background check are part of the hiring process", "Minimum age requirement: 21", "Must have U.S. work authorization"],
-        [f"You'll need a CDL-A", f"{min_exp} of OTR experience, minimum", "A clean MVR going back 3 years — no major violations",
-         "A current DOT physical on file", "Willingness to pass a drug screen and background check", "You must be at least 21", "Legal right to work in the U.S."],
-        [f"CDL Class A — active and valid", f"Verifiable OTR experience of at least {min_exp}", "No major violations on your driving record in the past 3 years",
-         "Current DOT medical examiner's certificate", "Pre-employment drug and background screening required", "Age 21 or above", "Authorized to work in the United States"],
-        [f"A valid Class A CDL is non-negotiable", f"We need at least {min_exp} of OTR time", "Your MVR needs to be clean — no major issues in the past 3 years",
-         "DOT medical card must be current", "Standard drug screen and background check apply", "21 years old minimum", "Must be eligible to work in the U.S."],
+    # ── "About {company}" blurbs ──────────────────────────────────────────────
+    about_blurbs = [
+        f"{company} is a privately held trucking company based in {city_state}. We specialize in dry van OTR freight and have built our reputation on consistent loads, reliable pay, and treating drivers with respect. We're not a mega-carrier — and that's by design.",
+        f"Founded and operated out of {city_state}, {company} has been moving freight across the country for years. We run a tight fleet, keep our equipment well-maintained, and invest in the drivers who keep our operation moving. Small enough to care, large enough to keep you rolling.",
+        f"{company} started in {city_state} with a simple idea: run freight the right way. That means good equipment, honest pay, and a dispatch team that has your back. We've grown steadily by doing exactly that — and we're not stopping now.",
+        f"We're a {city_state}-based carrier that believes in doing things the right way — fair pay, honest communication, and freight that actually moves. {company} isn't trying to be the biggest name in trucking. We just want to be the best one to work for.",
+        f"{company} operates out of {city_state} and runs dry van freight coast to coast. We're a close-knit operation where every driver matters and every mile gets paid. If you've been burned by big carriers before, you'll notice the difference here.",
     ]
 
-    style = random.choice(section_styles)
-    intro = random.choice(intros)
-    duties = random.choice(duties_sets)
-    reqs = random.choice(reqs_sets)
+    # ── "Apply Today" CTAs ────────────────────────────────────────────────────
+    apply_ctas = [
+        f"Ready to make a move? Apply today and a member of our recruiting team will reach out within 24 hours. We make the process straightforward — no runaround, no bait-and-switch.",
+        f"If {company} sounds like the right fit, don't wait. Apply now and let's talk. We respect your time and we'll give you a straight answer on whether this works for both of us.",
+        f"Applying takes two minutes. If you meet the qualifications and want consistent work with a carrier that delivers on its promises, hit apply and we'll be in touch.",
+        f"Take the next step. Apply today and connect with our team in {city_state}. We're hiring now and we move fast for qualified drivers.",
+        f"Don't let this one sit in your browser. Apply today — our team reviews applications daily and we'll get back to you fast.",
+    ]
 
+    # ── EEO statements (5 variations) ────────────────────────────────────────
+    eeo_statements = [
+        f"{company} is an Equal Opportunity Employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, national origin, age, disability, veteran status, sexual orientation, gender identity, or any other characteristic protected by applicable federal, state, or local law.",
+        f"{company} provides equal employment opportunities to all applicants and employees without regard to race, color, religion, gender, national origin, age, disability, sexual orientation, gender identity, veteran status, or any other legally protected status.",
+        f"We are an equal opportunity employer. Employment decisions at {company} are made without regard to race, color, religion, sex, national origin, age, disability, genetic information, veteran status, sexual orientation, or gender identity.",
+        f"{company} is committed to a diverse and inclusive workplace. We do not discriminate on the basis of race, color, religion, sex, national origin, age, disability, veteran status, or any other characteristic protected by law. All qualified candidates are encouraged to apply.",
+        f"Equal Opportunity Employer — {company} does not discriminate on the basis of race, sex, color, religion, age, national origin, marital status, disability, veteran status, genetic information, sexual orientation, gender identity, or any other reason prohibited by law in the provision of employment opportunities and benefits.",
+    ]
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
     def _ul(items):
         return "<ul>\n" + "".join(f"<li>{i}</li>\n" for i in items) + "</ul>"
 
-    perks_items = [f"{pay_range} based on experience"] + perks
+    def _section(title, content_html):
+        return f"<p><b>{title}</b></p>\n{content_html}"
 
-    html = f"""<p>{intro}</p>
+    # ── Build intro (vary length: 1 sentence vs full paragraph) ──────────────
+    raw_intro = random.choice(intros)
+    sentences = [s.strip() for s in raw_intro.replace("—", " — ").split(". ") if s.strip()]
+    if len(sentences) >= 3 and random.random() < 0.3:
+        intro_text = sentences[0] + "."
+    else:
+        intro_text = raw_intro
+    intro_html = f"<p>{intro_text}</p>"
 
-<p><b>{style["duties"]}</b></p>
-{_ul(duties)}
+    # ── Build duties section ──────────────────────────────────────────────────
+    style = random.choice(section_styles)
+    all_duties = duties_pool[tone][:]
+    random.shuffle(all_duties)
+    drop = random.randint(1, 2)
+    duties = all_duties[: max(4, len(all_duties) - drop)]
 
-<p><b>{style["reqs"]}</b></p>
-{_ul(reqs)}
+    # ── Build requirements section ────────────────────────────────────────────
+    pool = reqs_pool[tone]
+    core_reqs = pool["core"][:]
+    optional_reqs = pool["optional"][:]
+    random.shuffle(optional_reqs)
+    num_optional = random.randint(0, len(optional_reqs))
+    reqs = core_reqs + optional_reqs[:num_optional]
 
-<p><b>{style["pay"]}</b></p>
-{_ul(perks_items)}
+    # ── Build pay section (3 presentation styles) ────────────────────────────
+    pay_style = random.randint(0, 2)
+    if pay_style == 0:
+        # pay range as first bullet
+        pay_bullets = [f"{pay_range} weekly"] + perks
+        pay_title = style["pay"]
+        pay_html = _section(pay_title, _ul(pay_bullets))
+    elif pay_style == 1:
+        # intro sentence before bullet list
+        pay_title = style["pay"]
+        pay_intro = f"<p>Competitive weekly pay: <b>{pay_range}</b></p>"
+        pay_html = f"<p><b>{pay_title}</b></p>\n{pay_intro}\n{_ul(perks) if perks else ''}"
+    else:
+        # pay embedded in section heading
+        pay_title = f"{style['pay']} ({pay_range}/wk)"
+        pay_html = _section(pay_title, _ul(perks) if perks else "<p>Competitive pay discussed during hiring process.</p>")
 
-<p><b>{style["schedule"]}</b></p>
-{_ul([home_time, "OTR routes across all 48 states", "Full-time, consistent freight year-round"])}
+    # ── Build schedule section (3 presentation styles) ────────────────────────
+    sched_style = random.randint(0, 2)
+    if sched_style == 0:
+        sched_html = _section(style["schedule"], _ul([
+            home_time,
+            "OTR routes across all 48 states",
+            "Full-time, consistent freight year-round",
+        ]))
+    elif sched_style == 1:
+        sched_paragraph = (
+            f"Drivers at {company} run OTR across all 48 states. "
+            f"{home_time}. "
+            f"This is a full-time position with consistent freight year-round — no seasonal slowdowns."
+        )
+        sched_html = f"<p><b>{style['schedule']}</b></p>\n<p>{sched_paragraph}</p>"
+    else:
+        sched_paragraph = f"We run OTR across the continental U.S. out of {city_state}. Freight is consistent and full-time."
+        sched_html = (
+            f"<p><b>{style['schedule']}</b></p>\n"
+            f"<p>{sched_paragraph}</p>\n"
+            + _ul([home_time, "All 48 states"])
+        )
 
-<p><i>{company} is an Equal Opportunity Employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, national origin, age, disability, veteran status, sexual orientation, gender identity, or any other characteristic protected by applicable federal, state, or local law.</i></p>"""
-    return html
+    # ── Optional extra sections (0-2 of 3 possible) ──────────────────────────
+    extras_available = []
+
+    # "Why Drivers Stay"
+    stay_bullets = random.sample(culture_bullets, k=random.randint(3, 4))
+    stay_html = _section("Why Drivers Stay", _ul(stay_bullets))
+    extras_available.append(stay_html)
+
+    # "About {company}"
+    about_html = f"<p><b>About {company}</b></p>\n<p>{random.choice(about_blurbs)}</p>"
+    extras_available.append(about_html)
+
+    # "Apply Today"
+    apply_html = f"<p><b>Apply Today</b></p>\n<p>{random.choice(apply_ctas)}</p>"
+    extras_available.append(apply_html)
+
+    random.shuffle(extras_available)
+    num_extras = random.randint(0, 2)
+    chosen_extras = extras_available[:num_extras]
+
+    # ── EEO ──────────────────────────────────────────────────────────────────
+    eeo_html = f"<p><i>{random.choice(eeo_statements)}</i></p>"
+
+    # ── Section order (intro always first, EEO always last) ──────────────────
+    core_sections = [
+        ("duties",   _section(style["duties"], _ul(duties))),
+        ("reqs",     _section(style["reqs"],   _ul(reqs))),
+        ("pay",      pay_html),
+        ("schedule", sched_html),
+    ]
+    orders = [
+        ["duties", "reqs",     "pay",      "schedule"],
+        ["pay",    "duties",   "reqs",     "schedule"],
+        ["schedule","duties",  "pay",      "reqs"],
+        ["reqs",   "duties",   "pay",      "schedule"],
+    ]
+    chosen_order = random.choice(orders)
+    section_map = {k: v for k, v in core_sections}
+    ordered_sections = [section_map[k] for k in chosen_order]
+
+    # Inject extras before EEO (spread them around the ordered sections)
+    all_parts = [intro_html] + ordered_sections + chosen_extras + [eeo_html]
+
+    return "\n\n".join(all_parts)
 
 
 def _hex_to_rgb(hex_color: str) -> str:
