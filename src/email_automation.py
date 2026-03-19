@@ -37,6 +37,32 @@ class GoDaddyEmailBot:
         )
         self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
         log.info(f"Browser launched (Chrome, profile: account_{self.account_idx + 1})")
+        self._accept_cookies()
+
+    def _accept_cookies(self):
+        """Accept cookie consent banner if it appears, so session cookies persist."""
+        page = self._page
+        cookie_selectors = [
+            'button#onetrust-accept-btn-handler',
+            'button:has-text("Accept All Cookies")',
+            'button:has-text("Accept All")',
+            'button:has-text("Accept Cookies")',
+            'button:has-text("I Accept")',
+            'button:has-text("Got It")',
+            'button:has-text("OK")',
+            '#cookie-accept',
+        ]
+        for selector in cookie_selectors:
+            try:
+                btn = page.locator(selector).first
+                if btn.is_visible(timeout=1000):
+                    btn.click()
+                    page.wait_for_timeout(1000)
+                    log.info(f"Accepted cookie consent via: {selector}")
+                    return
+            except Exception:
+                continue
+        log.debug("No cookie consent banner found")
 
     def _dismiss_popups(self):
         """Dismiss any modals/popups/recommendation overlays that appear."""
@@ -119,7 +145,7 @@ class GoDaddyEmailBot:
                 'button[aria-label="Dismiss"]',
                 '[data-testid="close-button"]',
                 '.modal button.close',
-                'button:has-text("No thanks")',
+                'button:has-text("No, Thanks")',
                 'button:has-text("Not now")',
                 'button:has-text("Maybe later")',
                 'button:has-text("Skip")',
@@ -540,13 +566,13 @@ class GoDaddyEmailBot:
         page.wait_for_load_state("domcontentloaded")
         log.info("Create button clicked")
 
-        # Wait for the phone number notification offer to appear (up to 20 seconds)
+        # Wait for the phone number notification offer to appear (up to 25 seconds)
         # GoDaddy often offers to notify via phone after email creation
         dismissed_offer = False
-        for _ in range(40):
+        for _ in range(50):
             page.wait_for_timeout(500)
             try:
-                no_thanks = page.locator('button:has-text("No, thank you"), button:has-text("No thank you"), a:has-text("No, thank you"), a:has-text("No thank you")').first
+                no_thanks = page.locator('button:has-text("No, Thanks"), button:has-text("No Thanks"), a:has-text("No, Thanks"), a:has-text("No Thanks")').first
                 if no_thanks.is_visible(timeout=200):
                     no_thanks.click()
                     page.wait_for_timeout(1000)

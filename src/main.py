@@ -483,6 +483,67 @@ def cpanel_delete_file(file_path: str, account: dict) -> dict:
     return result
 
 
+def cpanel_remove_domain(domain: str, account: dict) -> dict:
+    """Remove an addon domain from cPanel via API2 AddonDomain::deladdondomain."""
+    # First, look up the actual subdomain cPanel assigned to this addon domain
+    lookup_url = f"{account['url']}/json-api/cpanel"
+    lookup_params = {
+        "cpanel_jsonapi_user": account["username"],
+        "cpanel_jsonapi_apiversion": "2",
+        "cpanel_jsonapi_module": "AddonDomain",
+        "cpanel_jsonapi_func": "listaddondomains",
+    }
+    lookup_resp = requests.get(lookup_url, params=lookup_params, headers=_cpanel_headers(account), timeout=15, verify=True)
+    lookup_resp.raise_for_status()
+    lookup_data = lookup_resp.json().get("cpanelresult", {}).get("data", [])
+
+    subdomain = None
+    for entry in lookup_data:
+        log.debug(f"cPanel addon domain entry: {entry}")
+        if entry.get("domain") == domain:
+            subdomain = entry.get("fullsubdomain", "") or domain.replace(".", "")
+            break
+
+    if subdomain is None:
+        return {"errors": [f"Domain '{domain}' not found as an addon domain"]}
+
+    log.debug(f"cPanel addon domain '{domain}' has subdomain: {subdomain}")
+
+    url = f"{account['url']}/json-api/cpanel"
+    params = {
+        "cpanel_jsonapi_user": account["username"],
+        "cpanel_jsonapi_apiversion": "2",
+        "cpanel_jsonapi_module": "AddonDomain",
+        "cpanel_jsonapi_func": "deladdondomain",
+        "domain": domain,
+        "subdomain": subdomain,
+    }
+    resp = requests.get(url, params=params, headers=_cpanel_headers(account), timeout=30, verify=True)
+    log.debug(f"cPanel remove domain response: {resp.status_code} {resp.text[:500]}")
+    resp.raise_for_status()
+    result = resp.json()
+
+    cpdata = result.get("cpanelresult", {}).get("data", [{}])
+    if cpdata and isinstance(cpdata, list) and len(cpdata) > 0:
+        item = cpdata[0]
+        if item.get("result") == 0:
+            reason = item.get("reason", "Unknown error")
+            result["errors"] = [reason]
+        else:
+            result["errors"] = None
+    return result
+
+
+def cpanel_run_autossl(account: dict):
+    """Trigger AutoSSL check via cPanel UAPI."""
+    url = f"{account['url']}/execute/SSL/start_autossl_check"
+    resp = requests.get(url, headers=_cpanel_headers(account), timeout=60, verify=True)
+    resp.raise_for_status()
+    result = resp.json()
+    log.debug(f"cPanel AutoSSL response: {result}")
+    return result
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TELEGRAM FILE DOWNLOAD
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -536,6 +597,12 @@ pending_generate = {}  # chat_id -> {step, ...collected info}
 # Generated zips awaiting optional deploy
 _pending_deploys = {}  # chat_id -> {zip_path, domain}
 
+# AutoSSL flow state
+pending_autossl = {}  # chat_id -> {step, domain}
+
+# Remove domain flow state
+pending_remove_domain = {}  # chat_id -> {step, domain}
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # BOT HANDLERS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -553,7 +620,9 @@ def handle_message(chat_id, text, message_id=None):
                 "• /buy — purchase a domain\n"
                 "• /setup — deploy a website\n"
                 "• /email — create an email account\n"
-                "• /generate — generate website + job description")
+                "• /generate — generate website + job description\n"
+                "• /run\\_autossl — run AutoSSL for a domain\n"
+                "• /remove\\_domain — remove a domain from hosting")
         return
 
     # Command: /cancel — cancel any active flow
@@ -568,13 +637,21 @@ def handle_message(chat_id, text, message_id=None):
             del pending_website_domain[chat_id]
             cancelled = True
         if chat_id in pending_buy:
-            del pending_buy[chat_id]
+            old_buy = pending_buy.pop(chat_id)
+            if isinstance(old_buy, dict) and old_buy.get("browser_bot"):
+                old_buy["browser_bot"].close()
             cancelled = True
         if chat_id in active_browser:
             active_browser.pop(chat_id).close()
             cancelled = True
         if chat_id in pending_generate:
             del pending_generate[chat_id]
+            cancelled = True
+        if chat_id in pending_autossl:
+            del pending_autossl[chat_id]
+            cancelled = True
+        if chat_id in pending_remove_domain:
+            del pending_remove_domain[chat_id]
             cancelled = True
         tg_send(chat_id, "🚫 Cancelled." if cancelled else "Nothing to cancel.")
         return
@@ -688,7 +765,10 @@ def handle_message(chat_id, text, message_id=None):
     # Command: /buy — purchase a domain
     if text == "/buy" or text.startswith("/buy "):
         pending_buy[chat_id] = {"step": "awaiting_company"}
-        tg_send(chat_id, "💰 *Domain Purchase*\n\nWhat is the company name?\nExample: `Werner Enterprises`")
+        tg_send(chat_id, "💰 *Domain Purchase*\n\nWhat is the company name?\nExample: `Werner Enterprises`",
+                reply_markup={"inline_keyboard": [[
+                    {"text": "⏭ Skip Indeed Check", "callback_data": "indeed_skip"},
+                ]]})
         return
 
     # Route to buy flow if user is in one
@@ -722,8 +802,8 @@ def handle_message(chat_id, text, message_id=None):
             if not DOMAIN_RE.match(domain):
                 tg_send(chat_id, "⚠️ Invalid domain format. Example: `mysite.com`")
                 return
-            del pending_buy[chat_id]
-            _check_and_buy_domain(chat_id, domain)
+            pending_buy[chat_id]["domain"] = domain
+            _start_domain_purchase(chat_id, domain)
             return
 
     # Command: /generate — generate website + job description
@@ -752,22 +832,76 @@ def handle_message(chat_id, text, message_id=None):
         _handle_generate_input(chat_id, raw_text)
         return
 
-    tg_send(chat_id, "⚠️ Unknown command. Use `/buy`, `/setup`, `/email`, `/generate`, or `/start`.")
+    # Command: /run_autossl — trigger AutoSSL for a domain
+    if text == "/run_autossl" or text.startswith("/run_autossl "):
+        domain = text.split(" ", 1)[1].strip() if " " in text else ""
+        if domain:
+            if not DOMAIN_RE.match(domain):
+                tg_send(chat_id, "⚠️ Invalid domain format. Example: `mysite.com`")
+                return
+            _start_autossl(chat_id, domain)
+        else:
+            pending_autossl[chat_id] = {"step": "awaiting_domain"}
+            tg_send(chat_id, "🔒 *Run AutoSSL*\n\nWhat domain? Example: `mysite.com`")
+        return
+
+    # Route to autossl flow if user is in one (awaiting domain)
+    if chat_id in pending_autossl:
+        pending = pending_autossl[chat_id]
+        if pending.get("step") == "awaiting_domain":
+            domain = text.strip()
+            if not DOMAIN_RE.match(domain):
+                tg_send(chat_id, "⚠️ Invalid domain format. Example: `mysite.com`")
+                return
+            del pending_autossl[chat_id]
+            _start_autossl(chat_id, domain)
+            return
+
+    # Command: /remove_domain — remove a domain from cPanel hosting
+    if text == "/remove_domain" or text.startswith("/remove_domain "):
+        domain = text.split(" ", 1)[1].strip() if " " in text else ""
+        if domain:
+            if not DOMAIN_RE.match(domain):
+                tg_send(chat_id, "⚠️ Invalid domain format. Example: `mysite.com`")
+                return
+            _start_remove_domain(chat_id, domain)
+        else:
+            pending_remove_domain[chat_id] = {"step": "awaiting_domain"}
+            tg_send(chat_id, "🗑 *Remove Domain*\n\nWhat domain to remove? Example: `mysite.com`")
+        return
+
+    # Route to remove domain flow if user is in one (awaiting domain)
+    if chat_id in pending_remove_domain:
+        pending = pending_remove_domain[chat_id]
+        if pending.get("step") == "awaiting_domain":
+            domain = text.strip()
+            if not DOMAIN_RE.match(domain):
+                tg_send(chat_id, "⚠️ Invalid domain format. Example: `mysite.com`")
+                return
+            del pending_remove_domain[chat_id]
+            _start_remove_domain(chat_id, domain)
+            return
+
+    tg_send(chat_id, "⚠️ Unknown command. Use `/buy`, `/setup`, `/email`, `/generate`, `/run_autossl`, `/remove_domain`, or `/start`.")
 
 
-def _check_and_buy_domain(chat_id, domain, account_idx=None):
-    """Check domain availability — pick account first if needed."""
-    log.info(f"Domain requested: {domain}")
+def _start_domain_purchase(chat_id, domain, account_idx=None):
+    """Start browser-based domain purchase flow."""
+    log.info(f"Domain purchase requested: {domain}")
 
-    if len(GODADDY_API_ACCOUNTS) == 0:
-        tg_send(chat_id, "🔴 No GoDaddy API accounts configured in `.env`")
+    if len(GODADDY_ACCOUNTS) == 0:
+        tg_send(chat_id, "🔴 No GoDaddy accounts configured in `.env`")
+        pending_buy.pop(chat_id, None)
         return
 
     # If multiple accounts and none selected yet, show picker
-    if account_idx is None and len(GODADDY_API_ACCOUNTS) > 1:
+    if account_idx is None and len(GODADDY_ACCOUNTS) > 1:
+        pending_buy[chat_id] = pending_buy.get(chat_id, {})
+        pending_buy[chat_id]["step"] = "awaiting_buy_account"
+        pending_buy[chat_id]["domain"] = domain
         buttons = []
-        for i, acc in enumerate(GODADDY_API_ACCOUNTS):
-            buttons.append([{"text": acc["label"], "callback_data": f"buy_acc:{i}:{domain}"}])
+        for i, acc in enumerate(GODADDY_ACCOUNTS):
+            buttons.append([{"text": acc["email"], "callback_data": f"buy_acc:{i}:{domain}"}])
         tg_send(chat_id,
                 f"💰 *Purchase* `{domain}`\n\nWhich GoDaddy account?",
                 reply_markup={"inline_keyboard": buttons})
@@ -775,33 +909,116 @@ def _check_and_buy_domain(chat_id, domain, account_idx=None):
 
     if account_idx is None:
         account_idx = 0
-    account = GODADDY_API_ACCOUNTS[account_idx]
+    account = GODADDY_ACCOUNTS[account_idx]
 
-    tg_send(chat_id, f"🔍 Checking availability of `{domain}`...")
+    tg_send(chat_id, f"🌐 Launching browser to search for `{domain}`...")
+
     try:
-        available, price = check_domain_availability(domain, account)
-    except requests.HTTPError as e:
-        msg = f"GoDaddy API error: {e}"
-        log.error(msg)
-        tg_send(chat_id, f"🔴 {msg}")
+        from domain_automation import GoDaddyDomainBot
+
+        bot = GoDaddyDomainBot(
+            email=account["email"],
+            password=account["password"],
+            account_idx=account_idx,
+            headless=False,
+        )
+        bot.open()
+
+        tg_send(chat_id, f"🔍 Searching for `{domain}`...")
+        result = bot.search_domain(domain)
+
+        if not result["available"]:
+            tg_send(chat_id, f"❌ `{domain}` is not available for purchase. Browser left open — use `/close` when done.")
+            active_browser[chat_id] = bot
+            pending_buy.pop(chat_id, None)
+            return
+
+        price = result["price"] or "unknown"
+        pending_buy[chat_id] = {
+            "step": "awaiting_buy_confirm",
+            "domain": domain,
+            "account_idx": account_idx,
+            "browser_bot": bot,
+            "price": price,
+        }
+
+        # Screenshot the search results
+        screenshot_path = os.path.join(tempfile.gettempdir(), f"domain_search_{chat_id}.png")
+        bot.screenshot(screenshot_path)
+        tg_send_photo(chat_id, screenshot_path,
+                      caption=f"✅ `{domain}` is available — *{price}/yr* (1 Year)")
+        try:
+            os.remove(screenshot_path)
+        except Exception:
+            pass
+
+        tg_send(chat_id,
+                f"Proceed with purchase?",
+                reply_markup={"inline_keyboard": [[
+                    {"text": "💰 Proceed to Buy", "callback_data": "buy_proceed"},
+                    {"text": "❌ Cancel", "callback_data": "buy_cancel"},
+                ]]})
+
+    except Exception as e:
+        log.error(f"Domain search error: {e}")
+        tg_send(chat_id, f"🔴 Error searching for domain:\n`{e}`\n\nBrowser left open — use `/close` when done.")
+        if bot:
+            active_browser[chat_id] = bot
+        pending_buy.pop(chat_id, None)
+
+
+def _proceed_buy_to_checkout(chat_id):
+    """Drive the browser from search results through cart to checkout page."""
+    state = pending_buy.get(chat_id, {})
+    bot = state.get("browser_bot")
+    domain = state.get("domain", "unknown")
+
+    if not bot:
+        tg_send(chat_id, "🔴 Browser session expired. Start over with `/buy`.")
+        pending_buy.pop(chat_id, None)
         return
 
-    if not available:
-        tg_send(chat_id, f"❌ `{domain}` is not available for purchase.")
-        return
+    try:
+        tg_send(chat_id, "🛒 Adding to cart...")
+        bot.select_term_and_add()
+        bot.go_to_cart()
 
-    # Show price and Buy/Cancel buttons — encode account index in callback
-    tg_send(
-        chat_id,
-        f"✅ `{domain}` is available — *${price:.2f}/year*\n\n"
-        f"Purchase this domain?",
-        reply_markup={
-            "inline_keyboard": [[
-                {"text": "💰 Buy", "callback_data": f"buy:{account_idx}:{domain}"},
-                {"text": "❌ Cancel", "callback_data": "cancel"},
-            ]]
-        },
-    )
+        tg_send(chat_id, "⏭ Skipping extras...")
+        bot.skip_extras()
+
+        tg_send(chat_id, "📋 Reviewing cart...")
+        bot.prepare_checkout()
+
+        # Screenshot the checkout page
+        screenshot_path = os.path.join(tempfile.gettempdir(), f"domain_checkout_{chat_id}.png")
+        bot.screenshot(screenshot_path)
+        tg_send_photo(chat_id, screenshot_path,
+                      caption=f"🔒 Reached checkout for `{domain}`")
+        try:
+            os.remove(screenshot_path)
+        except Exception:
+            pass
+
+        tg_send(chat_id,
+                f"✅ *Checkout ready for* `{domain}`\n\n"
+                f"Browser is at the checkout page. Use `/close` when done.")
+
+        # Keep browser open at checkout — move to active_browser
+        active_browser[chat_id] = bot
+        state.pop("browser_bot", None)
+        pending_buy.pop(chat_id, None)
+
+    except Exception as e:
+        log.error(f"Domain purchase flow error: {e}")
+        # Take debug screenshot
+        try:
+            bot.screenshot(f"{os.path.dirname(os.path.abspath(__file__))}/../logs/debug_domain_purchase.png")
+        except Exception:
+            pass
+        tg_send(chat_id, f"🔴 Error during purchase flow:\n`{e}`\n\nBrowser left open — use `/close` when done.")
+        active_browser[chat_id] = bot
+        state.pop("browser_bot", None)
+        pending_buy.pop(chat_id, None)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -993,6 +1210,99 @@ def _start_website_setup(chat_id, domain, account_idx=None):
             f"📦 Now send me the `.zip` file with your website files "
             f"(HTML, CSS, images).\n\n"
             f"The contents will be deployed to `{domain}`.")
+
+
+def _start_autossl(chat_id, domain, account_idx=None):
+    """Run AutoSSL for a domain on the selected cPanel account."""
+    log.info(f"AutoSSL requested for: {domain}")
+
+    if len(CPANEL_ACCOUNTS) == 0:
+        tg_send(chat_id, "🔴 No cPanel accounts configured in `.env`")
+        return
+
+    if account_idx is None and len(CPANEL_ACCOUNTS) > 1:
+        # Show account picker
+        pending_autossl[chat_id] = {"domain": domain, "step": "awaiting_account"}
+        buttons = []
+        for i, acc in enumerate(CPANEL_ACCOUNTS):
+            buttons.append([{"text": acc["label"], "callback_data": f"autossl_acc:{i}:{domain}"}])
+        tg_send(chat_id,
+                f"🔒 *AutoSSL for* `{domain}`\n\nWhich hosting account?",
+                reply_markup={"inline_keyboard": buttons})
+        return
+
+    # Single account or account already chosen
+    if account_idx is None:
+        account_idx = 0
+    account = CPANEL_ACCOUNTS[account_idx]
+
+    tg_send(chat_id, f"🔒 Running AutoSSL for `{domain}` ({account['label']})...")
+
+    try:
+        result = cpanel_run_autossl(account)
+        errors = result.get("errors")
+        if errors:
+            log.error(f"AutoSSL failed: {errors}")
+            tg_send(chat_id, f"🔴 AutoSSL failed:\n`{errors}`")
+        else:
+            tg_send(chat_id,
+                    f"✅ AutoSSL started for `{domain}` ({account['label']})\n\n"
+                    f"SSL certificate will be issued shortly. It may take a few minutes to propagate.")
+            log.info(f"AutoSSL triggered for {domain} on {account['label']}")
+    except Exception as e:
+        log.error(f"AutoSSL error: {e}")
+        tg_send(chat_id, f"🔴 AutoSSL error:\n`{e}`")
+
+
+def _start_remove_domain(chat_id, domain, account_idx=None):
+    """Remove a domain from cPanel hosting — pick account, confirm, then delete."""
+    log.info(f"Domain removal requested: {domain}")
+
+    if len(CPANEL_ACCOUNTS) == 0:
+        tg_send(chat_id, "🔴 No cPanel accounts configured in `.env`")
+        return
+
+    if account_idx is None and len(CPANEL_ACCOUNTS) > 1:
+        # Show account picker
+        pending_remove_domain[chat_id] = {"domain": domain, "step": "awaiting_account"}
+        buttons = []
+        for i, acc in enumerate(CPANEL_ACCOUNTS):
+            buttons.append([{"text": acc["label"], "callback_data": f"remove_acc:{i}:{domain}"}])
+        tg_send(chat_id,
+                f"🗑 *Remove* `{domain}`\n\nWhich hosting account?",
+                reply_markup={"inline_keyboard": buttons})
+        return
+
+    if account_idx is None:
+        account_idx = 0
+    account = CPANEL_ACCOUNTS[account_idx]
+
+    # Check if domain exists in cPanel first
+    try:
+        url = f"{account['url']}/execute/DomainInfo/list_domains"
+        resp = requests.get(url, headers=_cpanel_headers(account), timeout=15, verify=True)
+        resp.raise_for_status()
+        data = resp.json().get("data", {})
+        addon_domains = data.get("addon_domains", [])
+        all_domains = addon_domains + data.get("parked_domains", []) + [data.get("main_domain", "")]
+        if domain not in all_domains:
+            tg_send(chat_id, f"❌ `{domain}` was not found on hosting ({account['label']}).")
+            pending_remove_domain.pop(chat_id, None)
+            return
+    except Exception as e:
+        log.error(f"Failed to check domains: {e}")
+        tg_send(chat_id, f"🔴 Could not verify domain exists:\n`{e}`")
+        pending_remove_domain.pop(chat_id, None)
+        return
+
+    # Ask for confirmation before removing
+    tg_send(chat_id,
+            f"⚠️ *Are you sure you want to remove* `{domain}` *from hosting* ({account['label']})?\n\n"
+            f"This will permanently delete the domain from cPanel. The website files will remain in the document root.",
+            reply_markup={"inline_keyboard": [[
+                {"text": "✅ Yes, Remove", "callback_data": f"confirm_remove:{account_idx}:{domain}"},
+                {"text": "❌ Cancel", "callback_data": "cancel_remove"},
+            ]]})
 
 
 def handle_document(chat_id, document, message):
@@ -1403,61 +1713,32 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
         tg_send(chat_id, "What domain? Example: `mysite.com`")
         return
 
+    if data == "indeed_skip":
+        tg_edit_message(chat_id, message_id, "⏭ Indeed check skipped.")
+        pending_buy[chat_id] = {"step": "awaiting_domain"}
+        tg_send(chat_id, "What domain? Example: `mysite.com`")
+        return
+
     if data.startswith("buy_acc:"):
         # Account picker callback: buy_acc:IDX:domain
         parts = data.split(":", 2)
         idx = int(parts[1])
         domain = parts[2]
-        tg_edit_message(chat_id, message_id, f"Account: {GODADDY_API_ACCOUNTS[idx]['label']}")
-        _check_and_buy_domain(chat_id, domain, account_idx=idx)
+        tg_edit_message(chat_id, message_id, f"Account: {GODADDY_ACCOUNTS[idx]['email']}")
+        _start_domain_purchase(chat_id, domain, account_idx=idx)
         return
 
-    if data.startswith("buy:"):
-        # Format: buy:ACC_IDX:domain
-        parts = data.split(":", 2)
-        acc_idx = int(parts[1])
-        domain = parts[2]
-        acc_label = GODADDY_API_ACCOUNTS[acc_idx]["label"]
-        tg_edit_message(chat_id, message_id, f"💰 Buy `{domain}`?")
-        tg_send(chat_id,
-                f"⚠️ *Final Confirmation*\n\n"
-                f"This will charge the payment method on your GoDaddy account ({acc_label}).\n\n"
-                f"Domain: `{domain}`\n\n"
-                f"Are you sure?",
-                reply_markup={
-                    "inline_keyboard": [[
-                        {"text": "✅ Confirm Purchase", "callback_data": f"confirm_buy:{acc_idx}:{domain}"},
-                        {"text": "❌ Cancel", "callback_data": "cancel"},
-                    ]]
-                })
+    if data == "buy_proceed":
+        tg_edit_message(chat_id, message_id, "⏳ Proceeding to checkout...")
+        _proceed_buy_to_checkout(chat_id)
         return
 
-    if data.startswith("confirm_buy:"):
-        parts = data.split(":", 2)
-        acc_idx = int(parts[1])
-        domain = parts[2]
-        account = GODADDY_API_ACCOUNTS[acc_idx]
-        tg_edit_message(chat_id, message_id, f"⏳ Purchasing `{domain}`...")
-
-        try:
-            order = purchase_domain(domain, account)
-            order_id = order.get("orderId", "N/A")
-            log.info(f"Domain purchased: {domain} | Order ID: {order_id}")
-            tg_send(chat_id,
-                    f"✅ *Domain purchased!*\n\n"
-                    f"Domain: `{domain}`\n"
-                    f"Order ID: `{order_id}`\n\n"
-                    f"Set up website now?",
-                    reply_markup={
-                        "inline_keyboard": [[
-                            {"text": "🌐 Setup Website", "callback_data": f"setup:{domain}"},
-                            {"text": "⏭ Skip", "callback_data": "cancel"},
-                        ]]
-                    })
-        except requests.HTTPError as e:
-            body = e.response.text if e.response else str(e)
-            log.error(f"Purchase failed for '{domain}': {body}")
-            tg_send(chat_id, f"🔴 Purchase failed for `{domain}`\n\n`{body}`")
+    if data == "buy_cancel":
+        state = pending_buy.pop(chat_id, {})
+        bot = state.get("browser_bot")
+        if bot:
+            bot.close()
+        tg_edit_message(chat_id, message_id, "🚫 Purchase cancelled.")
         return
 
     if data.startswith("setup:"):
@@ -1473,6 +1754,54 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
         acc = CPANEL_ACCOUNTS[idx]
         tg_edit_message(chat_id, message_id, f"Hosting: {acc['label']}")
         _start_website_setup(chat_id, domain, account_idx=idx)
+        return
+
+    if data.startswith("autossl_acc:"):
+        parts = data.split(":", 2)
+        idx = int(parts[1])
+        domain = parts[2]
+        acc = CPANEL_ACCOUNTS[idx]
+        tg_edit_message(chat_id, message_id, f"Hosting: {acc['label']}")
+        pending_autossl.pop(chat_id, None)
+        _start_autossl(chat_id, domain, account_idx=idx)
+        return
+
+    # ── Remove domain callbacks ──────────────────────
+    if data.startswith("remove_acc:"):
+        parts = data.split(":", 2)
+        idx = int(parts[1])
+        domain = parts[2]
+        acc = CPANEL_ACCOUNTS[idx]
+        tg_edit_message(chat_id, message_id, f"Hosting: {acc['label']}")
+        pending_remove_domain.pop(chat_id, None)
+        _start_remove_domain(chat_id, domain, account_idx=idx)
+        return
+
+    if data.startswith("confirm_remove:"):
+        parts = data.split(":", 2)
+        acc_idx = int(parts[1])
+        domain = parts[2]
+        account = CPANEL_ACCOUNTS[acc_idx]
+        tg_edit_message(chat_id, message_id, f"⏳ Removing `{domain}`...")
+
+        try:
+            result = cpanel_remove_domain(domain, account)
+            errors = result.get("errors")
+            if errors:
+                log.error(f"Domain removal failed: {errors}")
+                tg_send(chat_id, f"🔴 Failed to remove `{domain}`:\n`{errors}`")
+            else:
+                log.info(f"Domain removed: {domain} from {account['label']}")
+                tg_send(chat_id, f"✅ `{domain}` has been removed from hosting ({account['label']}).")
+        except Exception as e:
+            log.error(f"Domain removal error: {e}")
+            tg_send(chat_id, f"🔴 Error removing domain:\n`{e}`")
+        pending_remove_domain.pop(chat_id, None)
+        return
+
+    if data == "cancel_remove":
+        tg_edit_message(chat_id, message_id, "🚫 Domain removal cancelled.")
+        pending_remove_domain.pop(chat_id, None)
         return
 
     # ── Email flow callbacks ──────────────────────────
@@ -1657,6 +1986,8 @@ def tg_set_commands():
         {"command": "email", "description": "Create M365 email account"},
         {"command": "setup", "description": "Deploy website to hosting"},
         {"command": "generate", "description": "Generate website + job description"},
+        {"command": "run_autossl", "description": "Run AutoSSL for a domain"},
+        {"command": "remove_domain", "description": "Remove a domain from hosting"},
         {"command": "close", "description": "Close the browser"},
         {"command": "cancel", "description": "Cancel current operation"},
         {"command": "users", "description": "List approved users (admin)"},
@@ -1695,18 +2026,6 @@ def run():
             offset = None
     except Exception:
         offset = None
-
-    # Send startup message after flush so it doesn't get skipped
-    try:
-        tg_send(TELEGRAM_CHAT_ID,
-                "🤖 *Bot is online!*\n\n"
-                "/buy — purchase a domain\n"
-                "/setup — deploy a website\n"
-                "/email — create an email account\n"
-                "/generate — generate website + job description")
-        log.info("Startup message sent to Telegram")
-    except Exception as e:
-        log.error(f"Failed to send startup message: {e}")
 
     # Register commands so they show in Telegram's menu
     tg_set_commands()
