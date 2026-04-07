@@ -10,6 +10,7 @@ A guide explaining how the codebase works, what each file does, and key concepts
 src/
   main.py               — The brain: Telegram bot + all API integrations + flow logic
   email_automation.py   — Browser automation for GoDaddy Email & Office
+  domain_automation.py  — Browser automation for GoDaddy domain purchasing
   website_generator.py  — HTML website + job description generator
 ```
 
@@ -98,8 +99,34 @@ Drives GoDaddy's Email & Office web UI using Playwright + real Chrome.
 
 **SSO login handling:** `_ensure_logged_in()` checks if the page redirected to SSO. If yes, `_do_sso_login()` fills username → password → waits for redirect. If cookies are valid, login is skipped entirely.
 
-**Key quirks handled:**
-- `_dismiss_popups()` — GoDaddy randomly shows recommendation modals
+**Smart popup handling (`_safe_click` / `_safe_fill`):**
+
+GoDaddy randomly shows popups (especially the "Create an email account" recommendation modal) at unpredictable times. Instead of checking for popups only at a few hardcoded points, every important click and form fill goes through wrapper methods:
+
+```
+_safe_click(locator, description):
+    for attempt in 1..3:
+        try clicking the element
+        if it works → done
+        if it fails (popup covering it):
+            call _dismiss_popups() to clear the blocker
+            retry the click
+```
+
+`_safe_fill()` works the same way but for typing into input fields. This means the bot can recover from a popup appearing at any point — mid-form, after clicking Continue, whenever.
+
+**Popup dismissal (`_dismiss_popups`):**
+
+Runs up to 3 rounds (for stacked popups). Three strategies, tried in order:
+1. **"Create an email account" modal** — uses JavaScript to find the modal heading, walks up the DOM to find the modal container, then clicks Cancel or X *inside that container only* (avoids clicking wrong elements on the page behind the popup)
+2. **Generic JS sweep** — searches for any visible modal/dialog close buttons in the DOM
+3. **Playwright selectors** — tries a list of common close button patterns as fallback
+
+**Microsoft Customer Agreement:**
+
+After clicking Create, some accounts show a "Microsoft Customer Agreement Acknowledgment" page with a heavy embedded doc viewer. The bot polls every 1 second for up to 20 seconds looking for the "Accept Agreement" button via JavaScript (searches `<button>`, `<a>`, `<input>`, `[role="button"]`). After clicking, waits 10 seconds for the page to process.
+
+**Other quirks handled:**
 - Single expiration date = no dropdown, just static text (handled specially)
 - Never use `networkidle` — GoDaddy's SPA never stops making requests
 

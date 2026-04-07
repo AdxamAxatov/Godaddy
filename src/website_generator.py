@@ -131,7 +131,7 @@ HERO_TAGLINES = [
     ("Keeping America <span class='accent'>Moving</span>", "Drivers Needed — Apply Now"),
     ("On Time. <span class='accent'>Every Time.</span>", "We're Hiring CDL-A Drivers"),
     ("The Road Starts <span class='accent'>Here</span>", "Join Our Growing Fleet"),
-    ("Driven by <span class='accent'>Results</span>", "Hiring OTR Drivers"),
+    ("Driven by <span class='accent'>Results</span>", "Hiring CDL-A Drivers"),
     ("Where <span class='accent'>Freight</span> Meets Trust", "Apply Today"),
     ("Hauling With <span class='accent'>Purpose</span>", "Now Accepting Applications"),
     ("No Shortcuts. <span class='accent'>No Excuses.</span>", "CDL-A Positions Open"),
@@ -144,12 +144,12 @@ HERO_TAGLINES = [
     ("Freight Done <span class='accent'>Right</span>", "CDL-A Drivers — Apply Now"),
     ("Trusted by Shippers. <span class='accent'>Built by Drivers.</span>", "Now Hiring Nationwide"),
     ("Your Load. <span class='accent'>Our Word.</span>", "Hiring Reliable Drivers"),
-    ("<span class='accent'>Steady</span> Miles. Strong Team.", "Open OTR Positions"),
+    ("<span class='accent'>Steady</span> Miles. Strong Team.", "Open Driving Positions"),
     ("Committed to the <span class='accent'>Long Haul</span>", "CDL-A Opportunities"),
     ("We Don't Just <span class='accent'>Ship.</span> We Deliver.", "Drivers Needed"),
     ("Powered by <span class='accent'>People</span> Who Care", "Join the Team"),
-    ("Making Freight <span class='accent'>Simple</span>", "Apply for OTR Positions"),
-    ("Coast to <span class='accent'>Coast.</span> Load to Load.", "Hiring Across 48 States"),
+    ("Making Freight <span class='accent'>Simple</span>", "Apply for Open Positions"),
+    ("Coast to <span class='accent'>Coast.</span> Load to Load.", "Now Hiring CDL-A Drivers"),
     ("The Road Is <span class='accent'>Calling</span>", "Full-Time Positions Open"),
     ("Built for the <span class='accent'>Open Road</span>", "Experienced Drivers Welcome"),
     ("Professional Hauling. <span class='accent'>Personal Touch.</span>", "Start Driving With Us"),
@@ -293,11 +293,11 @@ ABOUT_DESCRIPTIONS = [
     "{company} operates out of {city_state} with a focus on consistent, damage-free freight service. Our drivers are experienced and our dispatch team runs 24/7.",
     "Founded in {city_state}, {company} is a growing carrier that puts service quality above everything else. We keep our fleet modern and our drivers supported.",
     "{company} runs a tight operation out of {city_state}. We're not the biggest carrier — but we're one of the most dependable. Our customers stay because we deliver on our word.",
-    "Headquartered in {city_state}, {company} provides reliable OTR freight service with a personal touch. We treat every load like our reputation depends on it — because it does.",
+    "Headquartered in {city_state}, {company} provides reliable freight service with a personal touch. We treat every load like our reputation depends on it — because it does.",
     "We're {company}, a {city_state}-based trucking operation that was started by people who actually understand the road. Our priority is simple: move freight safely and on time.",
     "{company} keeps it simple. We're a {city_state} carrier with professional drivers, well-maintained trucks, and a team that communicates. That's the whole formula.",
     "Out of {city_state}, {company} serves shippers who need a carrier they can trust without babysitting. We take the load and handle everything from there.",
-    "{company} is built around reliability. We're a {city_state} operation that moves freight across 48 states — with experienced drivers and equipment you can count on.",
+    "{company} is built around reliability. We're a {city_state} operation that moves freight across the region — with experienced drivers and equipment you can count on.",
     "We're a small carrier out of {city_state} that operates like a big one. {company} has the capacity, the tech, and the people to get your freight where it needs to be.",
     "{company} started with one truck and a commitment to do things right. Today we run a full fleet out of {city_state} — and that commitment hasn't changed.",
     "Based in {city_state}, {company} is a carrier that values accountability. Every driver, every load, every mile — tracked, managed, and delivered with care.",
@@ -306,7 +306,7 @@ ABOUT_DESCRIPTIONS = [
     "We're a {city_state} trucking company that puts our money where our mouth is. {company} invests in safety, equipment, and people — and it shows in every delivery.",
     "Shipping with {company} is straightforward. Tell us what you need, we move it. No middlemen, no runaround. Just honest freight service out of {city_state}.",
     "{company} is proud to call {city_state} home. We're a carrier that understands what shippers actually need — reliability, communication, and zero excuses.",
-    "From {city_state}, {company} covers the lower 48 with professional OTR service. We've built our reputation one on-time delivery at a time.",
+    "From {city_state}, {company} covers its lanes with professional service. We've built our reputation one on-time delivery at a time.",
     "At {company}, freight moves because our people make it happen. We're a {city_state}-based carrier with a hands-on dispatch team and drivers who take pride in the work.",
     "{company} was founded with a simple mission: be the carrier that other companies wish they'd called first. Operating from {city_state}, we serve the entire continental U.S.",
     "Our operation runs out of {city_state}, and our standards run high. {company} delivers freight safely, on time, and without drama — that's the whole pitch.",
@@ -325,7 +325,7 @@ ABOUT_CHECKLISTS = [
     ["Equipment you can depend on", "Professional, vetted drivers", "Dispatch available around the clock", "Safe, no-touch shipping"],
     ["Fleet maintained to the highest standard", "Experienced team behind every wheel", "Live dispatch coverage 24/7", "Damage-free freight handling"],
     ["Trucks inspected and serviced regularly", "Drivers who know the roads", "Full-time dispatch team on standby", "No-touch, no-hassle freight"],
-    ["Newer trucks with GPS tracking", "Qualified OTR professionals", "Always-on dispatch communication", "Freight handled with care"],
+    ["Newer trucks with GPS tracking", "Qualified driving professionals", "Always-on dispatch communication", "Freight handled with care"],
     ["Modern equipment in top condition", "Skilled drivers with years on the road", "Real-time dispatch monitoring", "Zero-touch freight policy"],
     ["Trucks built for long hauls", "Experienced, safety-focused drivers", "24/7 live dispatch support", "No-touch dry van loads"],
     ["Clean, reliable fleet", "Drivers who take pride in the work", "Dispatch that never goes dark", "Careful freight management"],
@@ -338,7 +338,7 @@ ABOUT_CHECKLISTS = [
     ["Modern trucks you can count on", "Safe, experienced driving team", "Full-coverage dispatch support", "Professional freight handling"],
     ["New equipment, maintained right", "Drivers who respect the road and the load", "Dispatch team always a call away", "No-touch handling standard"],
     ["Trucks that don't quit", "Dedicated, professional drivers", "Real dispatch — real people, real time", "Damage-free delivery guarantee"],
-    ["Fleet updated and GPS-tracked", "Seasoned OTR drivers", "Support team available 24/7", "No-touch policy on all freight"],
+    ["Fleet updated and GPS-tracked", "Seasoned professional drivers", "Support team available 24/7", "No-touch policy on all freight"],
     ["Road-ready rigs, always", "Drivers with proven safety records", "Live dispatch tracking", "No-touch freight, every load"],
     ["Reliable trucks, reliable service", "Professional drivers — background checked", "Around-the-clock dispatch team", "Freight protection built in"],
     ["Equipment inspected before every haul", "CDL-A team with real experience", "24/7 dispatch and driver support", "No-touch, secure hauling"],
@@ -385,10 +385,28 @@ COVERAGE_TITLES = [
     "Your Freight, Our Network",
 ]
 
+REGIONAL_COVERAGE_TITLES = [
+    "Regional Lanes, Consistent Service",
+    "Close to Home, Always on Time",
+    "Focused Coverage, Reliable Routes",
+    "Regional Routes That Work",
+    "Shorter Lanes. Bigger Results.",
+    "Multi-State Coverage, Local Feel",
+    "Your Region, Our Priority",
+    "Dedicated Lanes, Familiar Roads",
+    "Regional Reach, Personal Service",
+    "Routes Built Around Home Time",
+    "Tight Network, Strong Results",
+    "Covering What Matters Most",
+    "Lanes That Get You Home",
+    "Regional Freight Done Right",
+    "Focused Routes, Consistent Freight",
+]
+
 COVERAGE_DESCRIPTIONS = [
     "Whether it's a cross-country haul or a regional lane, {company} has the coverage and the freight to keep your business — and our drivers — moving without gaps.",
     "From coast to coast, {company} runs consistent freight lanes across all 48 states. Wherever your freight needs to go, we've got a truck heading that direction.",
-    "{company} covers the entire lower 48 with dependable OTR service. We maintain regular routes so our drivers stay productive and your freight stays on schedule.",
+    "{company} covers its lanes with dependable service. We maintain regular routes so our drivers stay productive and your freight stays on schedule.",
     "We don't cherry-pick lanes. {company} runs freight across the continental U.S. with consistent volume and routes that keep things moving year-round.",
     "Our network covers all 48 states with steady freight volume. {company} keeps lanes consistent so you always know what to expect — reliable pickup and delivery.",
     "{company} operates a full nationwide network. Whether it's East Coast, West Coast, or anywhere in between, your freight gets the same level of care.",
@@ -421,7 +439,7 @@ COVERAGE_DESCRIPTIONS = [
 COVERAGE_CHECKLISTS = [
     ["Full lower-48 coverage", "Steady, year-round freight volume", "Dedicated lane options available", "On-time delivery track record"],
     ["All 48 states covered", "Consistent freight year-round", "Preferred lane assignments", "Proven on-time performance"],
-    ["Nationwide OTR coverage", "No seasonal freight gaps", "Regular route options", "Strong delivery track record"],
+    ["Nationwide coverage", "No seasonal freight gaps", "Regular route options", "Strong delivery track record"],
     ["Coast-to-coast service", "Year-round freight availability", "Dedicated and spot lanes", "Reliable delivery history"],
     ["Lower-48 full coverage", "Freight that doesn't stop", "Lane consistency for drivers", "On-time rates above industry average"],
     ["Complete national coverage", "Steady volume, no dead miles", "Route familiarity for drivers", "Delivery commitments we keep"],
@@ -447,8 +465,34 @@ COVERAGE_CHECKLISTS = [
     ["National freight coverage", "Year-round load availability", "Consistent, familiar lanes", "Delivery commitments honored"],
     ["48 states served daily", "No freight shortages", "Route stability for our team", "Punctual delivery history"],
     ["Full continental coverage", "Steady demand across all seasons", "Lane assignments drivers prefer", "Delivery standards above the norm"],
-    ["U.S.-wide OTR coverage", "Loads available every week", "Routes that work for work-life balance", "On-time arrivals are our standard"],
+    ["U.S.-wide coverage", "Loads available every week", "Routes that work for work-life balance", "On-time arrivals are our standard"],
     ["Covering the whole country", "Consistent volume, consistent routes", "Lane options for every driver", "Delivery reputation built on results"],
+]
+
+REGIONAL_COVERAGE_DESCRIPTIONS = [
+    "Based in {city_state}, {company} provides reliable regional freight service across a focused multi-state area. Consistent lanes, dependable schedules, and freight that keeps moving.",
+    "{company} runs regional lanes out of {city_state} with the kind of consistency drivers and shippers both appreciate. We keep our routes tight and our service solid.",
+    "Regional freight done right. {company} operates dedicated lanes from {city_state}, keeping drivers close to home and freight on schedule.",
+    "From {city_state}, {company} covers a focused service area with dependable regional freight. We maintain regular routes so drivers stay productive and shippers stay happy.",
+    "{company} specializes in regional dry van freight from {city_state}. Shorter lanes, more home time, and the same professional service as any nationwide carrier.",
+    "We keep things close to home at {company}. Our regional lanes out of {city_state} give drivers consistent miles without the long stretches away from family.",
+    "{company} runs a tight regional network from {city_state}. Familiar routes, steady freight, and a schedule that lets you get home regularly.",
+    "Regional lanes with real consistency — that's what {company} offers out of {city_state}. We've built our service area around reliability and driver satisfaction.",
+    "{company} out of {city_state} keeps freight moving across our regional service area. Dedicated lanes, familiar routes, and a team that knows the territory.",
+    "Focused coverage, consistent freight. {company} runs regional lanes from {city_state} with the reliability that shippers depend on and drivers appreciate.",
+]
+
+REGIONAL_COVERAGE_CHECKLISTS = [
+    ["Focused regional coverage", "Steady, year-round freight volume", "Dedicated lane options available", "On-time delivery track record"],
+    ["Multi-state service area", "Consistent freight year-round", "Familiar route assignments", "Proven on-time performance"],
+    ["Regional lanes covered", "No seasonal freight gaps", "Regular route options", "Strong delivery track record"],
+    ["Tight regional network", "Year-round freight availability", "Dedicated lanes for drivers", "Reliable delivery history"],
+    ["Multi-state coverage", "Freight that doesn't stop", "Lane consistency for drivers", "On-time rates above industry average"],
+    ["Focused service area", "Steady volume, minimal deadhead", "Route familiarity for drivers", "Delivery commitments we keep"],
+    ["Regional reach", "Consistent, predictable freight", "Dedicated lane opportunities", "Track record of on-time delivery"],
+    ["Covering key regional lanes", "Non-stop freight flow", "Routes drivers can count on", "Dependable delivery every time"],
+    ["Strong regional presence", "Year-round shipping demand", "Preferred route matching", "On-time performance guaranteed"],
+    ["Full regional coverage", "Freight keeps rolling, all seasons", "Lane options that get you home", "Delivery reliability that's proven"],
 ]
 
 
@@ -490,8 +534,9 @@ def generate_website(info: dict) -> str:
     steps = random.choice(HOW_WE_WORK_SETS)
     about_title = random.choice(ABOUT_TITLES)
     about_checklist = random.choice(ABOUT_CHECKLISTS)
-    coverage_title = random.choice(COVERAGE_TITLES)
-    coverage_checklist = random.choice(COVERAGE_CHECKLISTS)
+    _is_regional = "regional" in info.get("routes_type", "OTR Routes").lower()
+    coverage_title = random.choice(REGIONAL_COVERAGE_TITLES if _is_regional else COVERAGE_TITLES)
+    coverage_checklist = random.choice(REGIONAL_COVERAGE_CHECKLISTS if _is_regional else COVERAGE_CHECKLISTS)
 
     company = info["company_name"]
     short = info.get("company_short", company.split()[0])
@@ -499,18 +544,22 @@ def generate_website(info: dict) -> str:
     email = info["email"]
     address = info["address"]
     city_state = info["city_state"]
-    service = info.get("service_type", "OTR Trucking — Dry Van — 48 States")
+    _route_type = info.get("routes_type", "OTR Routes")
+    _svc_label = "Regional" if "regional" in _route_type.lower() else "OTR"
+    _svc_area = "Multi-State" if _is_regional else "48 States"
+    service = info.get("service_type", f"{_svc_label} Trucking — Dry Van — {_svc_area}")
     job_title = info["job_title"]
     pay_range = info["pay_range"]
 
     # Pick random about/coverage descriptions and fill in company info
     about_desc = random.choice(ABOUT_DESCRIPTIONS).format(company=company, city_state=city_state)
-    coverage_desc = random.choice(COVERAGE_DESCRIPTIONS).format(company=company, city_state=city_state)
+    coverage_desc = random.choice(REGIONAL_COVERAGE_DESCRIPTIONS if _is_regional else COVERAGE_DESCRIPTIONS).format(company=company, city_state=city_state)
 
     # Hero description
     city_only = city_state.split(",")[0].strip() if "," in city_state else city_state
     state_only = city_state.split(",")[1].strip().split()[0] if "," in city_state else ""
-    hero_desc = info.get("hero_desc", f"{company} keeps goods moving across all 48 states with reliable service — out of {city_only}, {state_only}.")
+    _hero_area = "a focused multi-state region" if _is_regional else "all 48 states"
+    hero_desc = info.get("hero_desc", f"{company} keeps goods moving across {_hero_area} with reliable service — out of {city_only}, {state_only}.")
 
     # Build perks HTML
     perks_html = ""
@@ -925,7 +974,7 @@ def generate_website(info: dict) -> str:
           <div class="hero-stat-label">Dispatch Support</div>
         </div>
         <div>
-          <div class="hero-stat-num">OTR</div>
+          <div class="hero-stat-num">{_svc_label}</div>
           <div class="hero-stat-label">{info.get("service_short", "Dry Van Service")}</div>
         </div>
       </div>
@@ -1052,7 +1101,7 @@ def generate_website(info: dict) -> str:
             <div class="c-icon">&#9872;</div>
             <div>
               <h4>Address</h4>
-              <p>{address}<br>{city_state}</p>
+              <p>{address + '<br>' if address else ''}{city_state}</p>
             </div>
           </div>
           <div class="c-item">
@@ -1404,6 +1453,11 @@ def generate_job_description(info: dict) -> str:
     home_time = info.get("home_time", "Home every 2 weeks for 2 days")
     perks = info.get("perks", [])
     min_exp = info.get("min_experience", "6 months")
+    routes_type = info.get("routes_type", "OTR Routes")
+    is_regional = "regional" in routes_type.lower()
+    route_label = "Regional" if is_regional else "OTR"
+    route_area = "regional lanes" if is_regional else "all 48 states"
+    route_desc = "regional freight" if is_regional else "OTR freight"
 
     # ── Tone ─────────────────────────────────────────────────────────────────
     tone = random.choice(["direct", "professional", "conversational"])
@@ -1444,42 +1498,42 @@ def generate_job_description(info: dict) -> str:
 
     # ── 30 intro paragraphs ───────────────────────────────────────────────────
     intros = [
-        f"{company} is looking for a dependable driver out of {city_state}. We run freight across all 48 states with consistent miles and a dispatch team that keeps things moving. If you want steady work, fair pay, and a carrier that respects your time — keep reading.",
-        f"We need another solid driver at {company}. Based out of {city_state}, we haul dry van freight across the lower 48 with no games and no gimmicks. Good pay, real home time, and a team that has your back.",
+        f"{company} is looking for a dependable driver out of {city_state}. We run {route_desc} across {route_area} with consistent miles and a dispatch team that keeps things moving. If you want steady work, fair pay, and a carrier that respects your time — keep reading.",
+        f"We need another solid driver at {company}. Based out of {city_state}, we haul dry van freight with no games and no gimmicks. Good pay, real home time, and a team that has your back.",
         f"{company} is hiring out of {city_state}. We're a straightforward carrier that moves freight, pays well, and treats drivers like adults. If that sounds like what you've been looking for, here's the details.",
-        f"Looking for a driving job that doesn't come with a list of broken promises? {company} runs OTR freight from {city_state} across all 48 states. We keep it real — here's what the job looks like.",
-        f"{company} needs experienced drivers. We're based in {city_state} and we run the lower 48 with consistent freight, fair pay, and a dispatch team that actually listens. Here's the rundown.",
-        f"We're hiring at {company}. If you're a CDL-A driver looking for consistent miles and a carrier that doesn't waste your time, read on. We operate out of {city_state} and cover all 48 states.",
+        f"Looking for a driving job that doesn't come with a list of broken promises? {company} runs {route_desc} from {city_state} across {route_area}. We keep it real — here's what the job looks like.",
+        f"{company} needs experienced drivers. We're based in {city_state} and we run {route_desc} with consistent freight, fair pay, and a dispatch team that actually listens. Here's the rundown.",
+        f"We're hiring at {company}. If you're a CDL-A driver looking for consistent miles and a carrier that doesn't waste your time, read on. We operate out of {city_state} and cover {route_area}.",
         f"Tired of carriers that overpromise and underdeliver? {company} out of {city_state} keeps it simple: good freight, honest pay, and a team that respects the people behind the wheel.",
-        f"{company} is a {city_state}-based carrier looking to add experienced drivers to our fleet. We run all 48 states, pay consistently, and don't play games with home time.",
-        f"Here's a driving job that won't waste your time. {company} runs OTR dry van freight out of {city_state}. Consistent miles, weekly pay, and a dispatch team that treats you like a human being.",
-        f"If you know how to drive and want a company that knows how to treat drivers, {company} might be your next stop. We're hiring out of {city_state} for OTR routes across 48 states.",
-        f"{company} operates from {city_state} and we're looking for drivers who want stability. We run freight coast to coast with consistent lanes and a team that communicates.",
-        f"Want miles that actually pay and a company that actually cares? {company} is hiring OTR drivers out of {city_state}. No bait-and-switch — just honest work.",
-        f"At {company}, drivers aren't a number. We're a growing carrier out of {city_state} looking for experienced OTR professionals who want consistent work and real support.",
-        f"{company} hauls freight the right way — out of {city_state}, across all 48 states. We're hiring drivers who take the job seriously and want a carrier that does the same.",
-        f"We're expanding our fleet at {company} and need reliable CDL-A drivers. Based in {city_state}, we run steady OTR routes with good pay and real home time. Here's the full picture.",
+        f"{company} is a {city_state}-based carrier looking to add experienced drivers to our fleet. We run {route_desc} across {route_area}, pay consistently, and don't play games with home time.",
+        f"Here's a driving job that won't waste your time. {company} runs {route_desc} out of {city_state}. Consistent miles, weekly pay, and a dispatch team that treats you like a human being.",
+        f"If you know how to drive and want a company that knows how to treat drivers, {company} might be your next stop. We're hiring out of {city_state} for {route_label} routes across {route_area}.",
+        f"{company} operates from {city_state} and we're looking for drivers who want stability. We run freight with consistent lanes and a team that communicates.",
+        f"Want miles that actually pay and a company that actually cares? {company} is hiring {route_label} drivers out of {city_state}. No bait-and-switch — just honest work.",
+        f"At {company}, drivers aren't a number. We're a growing carrier out of {city_state} looking for experienced {route_label} professionals who want consistent work and real support.",
+        f"{company} hauls freight the right way — out of {city_state}, across {route_area}. We're hiring drivers who take the job seriously and want a carrier that does the same.",
+        f"We're expanding our fleet at {company} and need reliable CDL-A drivers. Based in {city_state}, we run steady {route_label} routes with good pay and real home time. Here's the full picture.",
         f"{company} is a no-nonsense carrier operating out of {city_state}. We need experienced drivers who want steady miles, fair compensation, and a company that keeps its word.",
-        f"Looking for your next driving gig? {company} runs OTR freight from {city_state} across the continental U.S. We've got the freight, the trucks, and the pay — we just need the driver.",
-        f"At {company} in {city_state}, we believe good drivers deserve a good company. We're hiring OTR professionals for consistent routes, weekly pay, and a team that backs you up.",
-        f"{company} is adding drivers to our team. We run all 48 states from our base in {city_state}. If you want consistent freight and a company that doesn't play games, this is it.",
+        f"Looking for your next driving gig? {company} runs {route_desc} from {city_state}. We've got the freight, the trucks, and the pay — we just need the driver.",
+        f"At {company} in {city_state}, we believe good drivers deserve a good company. We're hiring {route_label} professionals for consistent routes, weekly pay, and a team that backs you up.",
+        f"{company} is adding drivers to our team. We run {route_desc} from our base in {city_state}. If you want consistent freight and a company that doesn't play games, this is it.",
         f"We're a {city_state} carrier that's growing the right way. {company} needs experienced drivers who want reliable work, competitive pay, and a dispatch team that respects their time.",
-        f"No fluff, no empty promises. {company} is hiring CDL-A drivers out of {city_state} for OTR routes. Here's exactly what the job looks like and what you'll earn.",
+        f"No fluff, no empty promises. {company} is hiring CDL-A drivers out of {city_state} for {route_label} routes. Here's exactly what the job looks like and what you'll earn.",
         f"{company} runs clean, consistent freight out of {city_state}. We need another dependable driver who wants stable work and fair treatment. The details are below.",
-        f"Drivers at {company} get treated right. We're a growing operation in {city_state} looking for experienced OTR professionals. If you want honest work with honest pay, read on.",
-        f"Simple pitch: {company} needs drivers. We run OTR dry van freight out of {city_state}, pay weekly, and don't make you beg for home time. Interested? Keep reading.",
+        f"Drivers at {company} get treated right. We're a growing operation in {city_state} looking for experienced {route_label} professionals. If you want honest work with honest pay, read on.",
+        f"Simple pitch: {company} needs drivers. We run {route_desc} out of {city_state}, pay weekly, and don't make you beg for home time. Interested? Keep reading.",
         f"{company} out of {city_state} is looking for CDL-A drivers who want to work for a carrier that values their time, their safety, and their paycheck. Here's what we're offering.",
         f"We're not the biggest carrier, but we're one of the best to work for. {company} is hiring out of {city_state} and we treat our drivers like the professionals they are.",
-        f"Steady freight. Good pay. Real home time. That's {company} in three phrases. We're hiring CDL-A drivers from our {city_state} base for OTR routes across the lower 48.",
+        f"Steady freight. Good pay. Real home time. That's {company} in three phrases. We're hiring CDL-A drivers from our {city_state} base for {route_label} routes.",
         f"If you've been through carriers that don't deliver on their promises, give {company} a shot. We operate out of {city_state} and we mean what we say — about pay, about home time, about everything.",
-        f"{company} is a carrier worth driving for. Headquartered in {city_state}, we provide consistent OTR freight, competitive weekly pay, and a support team that actually supports.",
-        f"CDL-A drivers wanted at {company}. We haul freight across all 48 states from {city_state} with weekly pay, real benefits, and a team that has your back every mile.",
+        f"{company} is a carrier worth driving for. Headquartered in {city_state}, we provide consistent {route_desc}, competitive weekly pay, and a support team that actually supports.",
+        f"CDL-A drivers wanted at {company}. We haul freight across {route_area} from {city_state} with weekly pay, real benefits, and a team that has your back every mile.",
     ]
 
     # ── Duties pools (one per tone, 6 items each — drop 1-2 randomly) ─────────
     duties_pool = {
         "direct": [
-            "Drive OTR. Cover all 48 states. Stay on schedule.",
+            f"Drive {route_label}. Cover {route_area}. Stay on schedule.",
             "Pick up loads and deliver them — safely, on time, every run.",
             "Pre-trip and post-trip inspections. Every single day. No exceptions.",
             "Check in with dispatch. Keep them posted. Don't go dark.",
@@ -1489,7 +1543,7 @@ def generate_job_description(info: dict) -> str:
             "Follow load instructions to the letter. Pickups, deliveries, paperwork.",
         ],
         "professional": [
-            f"Operate a company-assigned Class A vehicle on over-the-road routes throughout the continental United States",
+            f"Operate a company-assigned Class A vehicle on {route_label.lower()} routes throughout {'the continental United States' if not is_regional else 'the designated service area'}",
             "Execute safe, timely freight pickups and deliveries in accordance with customer requirements and company standards",
             "Conduct thorough pre-trip and post-trip vehicle inspections as mandated by DOT regulations",
             "Maintain consistent communication with the dispatch team regarding load status, ETAs, and any route adjustments",
@@ -1499,7 +1553,7 @@ def generate_job_description(info: dict) -> str:
             "Adhere to all federal, state, and local transportation regulations throughout each assignment",
         ],
         "conversational": [
-            "You'll be running OTR across the lower 48 — we've got freight everywhere so the miles stay consistent",
+            f"You'll be running {route_label} across {route_area} — we've got freight everywhere so the miles stay consistent",
             "Pick up your loads, deliver them on time, treat the customer's dock like your own — that's the standard",
             "Do your pre-trip and post-trip every day — it protects you and the equipment, no shortcuts",
             "Stay in touch with your dispatcher — they're in your corner and communication keeps everyone moving",
@@ -1516,7 +1570,7 @@ def generate_job_description(info: dict) -> str:
         "direct": {
             "core": [
                 f"CDL-A. Valid. No exceptions.",
-                f"{min_exp} OTR experience, minimum.",
+                f"{min_exp} {route_label} experience, minimum.",
                 "Clean MVR — no majors in the last 3 years.",
                 "Current DOT medical card.",
                 "Pass the drug screen and background check.",
@@ -1530,7 +1584,7 @@ def generate_job_description(info: dict) -> str:
         "professional": {
             "core": [
                 f"Valid Class A Commercial Driver's License (CDL-A)",
-                f"Minimum of {min_exp} verifiable over-the-road driving experience",
+                f"Minimum of {min_exp} verifiable {route_label.lower()} driving experience",
                 "Clean driving record — no major violations within the past 36 months",
                 "Current DOT medical examiner's certificate",
                 "Ability to successfully complete pre-employment drug screening and background verification",
@@ -1544,7 +1598,7 @@ def generate_job_description(info: dict) -> str:
         "conversational": {
             "core": [
                 f"You'll need a valid CDL-A — active and in good standing",
-                f"At least {min_exp} of OTR experience under your belt",
+                f"At least {min_exp} of {route_label} experience under your belt",
                 "A clean MVR — no DUIs, reckless driving, or major violations in the past 3 years",
                 "Current DOT physical on file",
                 "You'll need to pass a drug screen and background check before you start",
@@ -1573,7 +1627,7 @@ def generate_job_description(info: dict) -> str:
 
     # ── "About {company}" blurbs ──────────────────────────────────────────────
     about_blurbs = [
-        f"{company} is a privately held trucking company based in {city_state}. We specialize in dry van OTR freight and have built our reputation on consistent loads, reliable pay, and treating drivers with respect. We're not a mega-carrier — and that's by design.",
+        f"{company} is a privately held trucking company based in {city_state}. We specialize in dry van {route_label} freight and have built our reputation on consistent loads, reliable pay, and treating drivers with respect. We're not a mega-carrier — and that's by design.",
         f"Founded and operated out of {city_state}, {company} has been moving freight across the country for years. We run a tight fleet, keep our equipment well-maintained, and invest in the drivers who keep our operation moving. Small enough to care, large enough to keep you rolling.",
         f"{company} started in {city_state} with a simple idea: run freight the right way. That means good equipment, honest pay, and a dispatch team that has your back. We've grown steadily by doing exactly that — and we're not stopping now.",
         f"We're a {city_state}-based carrier that believes in doing things the right way — fair pay, honest communication, and freight that actually moves. {company} isn't trying to be the biggest name in trucking. We just want to be the best one to work for.",
@@ -1651,22 +1705,22 @@ def generate_job_description(info: dict) -> str:
     if sched_style == 0:
         sched_html = _section(style["schedule"], _ul([
             home_time,
-            "OTR routes across all 48 states",
+            f"{route_label} routes across {route_area}",
             "Full-time, consistent freight year-round",
         ]))
     elif sched_style == 1:
         sched_paragraph = (
-            f"Drivers at {company} run OTR across all 48 states. "
+            f"Drivers at {company} run {route_label} across {route_area}. "
             f"{home_time}. "
             f"This is a full-time position with consistent freight year-round — no seasonal slowdowns."
         )
         sched_html = f"<p><b>{style['schedule']}</b></p>\n<p>{sched_paragraph}</p>"
     else:
-        sched_paragraph = f"We run OTR across the continental U.S. out of {city_state}. Freight is consistent and full-time."
+        sched_paragraph = f"We run {route_label} freight out of {city_state}. Freight is consistent and full-time."
         sched_html = (
             f"<p><b>{style['schedule']}</b></p>\n"
             f"<p>{sched_paragraph}</p>\n"
-            + _ul([home_time, "All 48 states"])
+            + _ul([home_time, route_area.capitalize()])
         )
 
     # ── Optional extra sections (0-2 of 3 possible) ──────────────────────────
@@ -1743,18 +1797,20 @@ def _build_ctx(info: dict, color: dict, font: tuple) -> dict:
         f'<div class="perk">{p}</div>' for p in info.get("perks", [])
     )
 
+    _is_regional = "regional" in info.get("routes_type", "OTR Routes").lower()
     about_desc = random.choice(ABOUT_DESCRIPTIONS).format(company=company, city_state=city_state)
-    coverage_desc = random.choice(COVERAGE_DESCRIPTIONS).format(company=company, city_state=city_state)
+    coverage_desc = random.choice(REGIONAL_COVERAGE_DESCRIPTIONS if _is_regional else COVERAGE_DESCRIPTIONS).format(company=company, city_state=city_state)
     about_title = random.choice(ABOUT_TITLES)
     about_checklist = random.choice(ABOUT_CHECKLISTS)
-    coverage_title = random.choice(COVERAGE_TITLES)
-    coverage_checklist = random.choice(COVERAGE_CHECKLISTS)
+    coverage_title = random.choice(REGIONAL_COVERAGE_TITLES if _is_regional else COVERAGE_TITLES)
+    coverage_checklist = random.choice(REGIONAL_COVERAGE_CHECKLISTS if _is_regional else COVERAGE_CHECKLISTS)
 
     city_only = city_state.split(",")[0].strip() if "," in city_state else city_state
     state_only = city_state.split(",")[1].strip().split()[0] if "," in city_state else ""
+    _hero_area = "a focused multi-state region" if _is_regional else "all 48 states"
     hero_desc = info.get(
         "hero_desc",
-        f"{company} keeps goods moving across all 48 states with reliable service — out of {city_only}, {state_only}."
+        f"{company} keeps goods moving across {_hero_area} with reliable service — out of {city_only}, {state_only}."
     )
 
     logo_parts = short.split(None, 1)
@@ -1830,7 +1886,7 @@ def _page_shell(ctx: dict, body_html: str, extra_css: str = "") -> str:
         "  <meta charset=\"UTF-8\">\n"
         "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
         f"  <title>{company} \u2014 CDL-A Drivers | {city_state}</title>\n"
-        f"  <meta name=\"description\" content=\"{company} is hiring CDL-A drivers in {city_state}. OTR dry van freight across 48 states.\">\n"
+        f"  <meta name=\"description\" content=\"{company} is hiring CDL-A drivers in {city_state}. {ctx['routes_type']} — dry van freight.\">\n"
         "  <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n"
         "  <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n"
         f"  <link href=\"{fu}\" rel=\"stylesheet\">\n"
@@ -1976,7 +2032,9 @@ def _footer(ctx: dict) -> str:
     navy = ctx["navy"]
     company = ctx["company_name"]
     email = ctx["email"]
+    address = ctx["address"]
     city_state = ctx["city_state"]
+    _addr = f"{address}<br>{city_state}" if address else city_state
     year = ctx["year"]
     logo = ctx["logo_html"]
     return (
@@ -1985,7 +2043,7 @@ def _footer(ctx: dict) -> str:
         "      <div style=\"display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:32px; margin-bottom:40px;\">\n"
         "        <div>\n"
         f"          <div style=\"font-family:'{fh}',sans-serif; font-weight:900; font-size:1.5rem; color:#fff; margin-bottom:10px;\">{logo}</div>\n"
-        f"          <p style=\"font-size:0.88rem; max-width:280px; line-height:1.6; color:#94A3B8;\">Professional CDL-A carrier serving all 48 states from {city_state}.</p>\n"
+        f"          <p style=\"font-size:0.88rem; max-width:280px; line-height:1.6; color:#94A3B8;\">Professional CDL-A carrier serving {ctx['routes'].lower()} from {city_state}.</p>\n"
         "        </div>\n"
         "        <div style=\"display:flex; gap:48px; flex-wrap:wrap;\">\n"
         "          <div>\n"
@@ -2000,7 +2058,7 @@ def _footer(ctx: dict) -> str:
         f"            <div style=\"font-family:'{fh}',sans-serif; font-size:0.72rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:{p}; margin-bottom:14px;\">Contact</div>\n"
         "            <div style=\"display:flex; flex-direction:column; gap:10px;\">\n"
         f"              <span style=\"font-size:0.88rem; color:#94A3B8;\">{email}</span>\n"
-        f"              <span style=\"font-size:0.88rem; color:#94A3B8;\">{city_state}</span>\n"
+        f"              <span style=\"font-size:0.88rem; color:#94A3B8;\">{_addr}</span>\n"
         "              <span style=\"font-size:0.88rem; color:#94A3B8;\">Dispatch: 24/7</span>\n"
         "            </div>\n"
         "          </div>\n"
@@ -2047,9 +2105,9 @@ def _hero_v1(ctx: dict) -> str:
         "      </div>\n"
         "      <div class=\"reveal\" style=\"display:flex; justify-content:center; gap:16px; margin-top:60px; flex-wrap:wrap;\">\n"
         "        <div style=\"background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12);"
-        " border-radius:50px; padding:10px 24px; color:#fff; font-size:0.88rem; font-weight:600;\">\U0001f5fa\ufe0f 48 States</div>\n"
+        f" border-radius:50px; padding:10px 24px; color:#fff; font-size:0.88rem; font-weight:600;\">\U0001f5fa\ufe0f {ctx['routes']}</div>\n"
         "        <div style=\"background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12);"
-        " border-radius:50px; padding:10px 24px; color:#fff; font-size:0.88rem; font-weight:600;\">\U0001f69a OTR Routes</div>\n"
+        f" border-radius:50px; padding:10px 24px; color:#fff; font-size:0.88rem; font-weight:600;\">\U0001f69a {ctx['routes_type']}</div>\n"
         "        <div style=\"background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12);"
         " border-radius:50px; padding:10px 24px; color:#fff; font-size:0.88rem; font-weight:600;\">\U0001faaa CDL-A Required</div>\n"
         "      </div>\n"
@@ -2462,6 +2520,11 @@ def _about_v3(ctx: dict) -> str:
     """Dark bg, heading+desc left, 3 stat boxes right."""
     p = ctx["primary"]; pl = ctx["primary_light"]
     navy = ctx["navy"]; fh = ctx["font_heading"]
+    _is_regional = "regional" in ctx.get("routes_type", "OTR Routes").lower()
+    if _is_regional:
+        route_stat = ("Multi", "State Coverage", "Focused regional lanes with consistent freight")
+    else:
+        route_stat = ("48", "States Covered", "Full lower-48 coverage, year-round freight")
     stat_rows = "".join(
         f"          <div style=\"background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);"
         f" border-radius:12px; padding:28px 32px; display:flex; align-items:center; gap:24px;\">\n"
@@ -2470,7 +2533,7 @@ def _about_v3(ctx: dict) -> str:
         f"<div style=\"font-size:0.88rem; color:rgba(255,255,255,0.45);\">{sub}</div></div>\n"
         "          </div>\n"
         for val, title, sub in [
-            ("48", "States Covered", "Full lower-48 coverage, year-round freight"),
+            route_stat,
             ("24/7", "Dispatch Available", "Our team is always on \u2014 day or night"),
             ("CDL", "Class A Drivers", "Professional, vetted, experienced team"),
         ]
@@ -2498,11 +2561,17 @@ def _about_v4(ctx: dict) -> str:
     """3 feature cards: icon + title + desc."""
     p = ctx["primary"]; navy = ctx["navy"]; g50 = ctx["gray_50"]
     fh = ctx["font_heading"]; pr = _hex_to_rgb(p)
+    _is_regional = "regional" in ctx.get("routes_type", "OTR Routes").lower()
+    if _is_regional:
+        coverage_card = ("\U0001f5fa\ufe0f", "Regional Coverage",
+            "We run dedicated regional lanes with consistent freight and familiar routes. Focused coverage that keeps drivers close to home.")
+    else:
+        coverage_card = ("\U0001f5fa\ufe0f", "48 State Coverage",
+            "We run freight across the entire lower 48 with consistent lanes and year-round volume. Wherever your load needs to go, we have the coverage.")
     features = [
         ("\U0001f9d1\u200d\u2708\ufe0f", "Professional Drivers",
          "Every driver on our team is vetted, experienced, and committed to safe, on-time delivery. We don't cut corners on who we put behind the wheel."),
-        ("\U0001f5fa\ufe0f", "48 State Coverage",
-         "We run freight across the entire lower 48 with consistent lanes and year-round volume. Wherever your load needs to go, we have the coverage."),
+        coverage_card,
         ("\U0001f4e6", "No-Touch Dry Van",
          "All freight is strictly no-touch. Our drivers focus on driving \u2014 pickups and deliveries are handled cleanly and professionally."),
     ]
@@ -2653,7 +2722,7 @@ def _careers_v2(ctx: dict) -> str:
         " flex-wrap:wrap; gap:16px; margin-bottom:32px; box-shadow:0 4px 16px rgba(0,0,0,0.04);\">\n"
         "        <div>\n"
         f"          <div style=\"font-family:'{fh}',sans-serif; font-size:1.3rem; font-weight:800; color:{navy};\">{ctx['job_title']}</div>\n"
-        f"          <div style=\"font-size:0.88rem; color:#64748B; margin-top:4px;\">Full-Time &middot; OTR &middot; 48 States &middot; {ctx['city_state']}</div>\n"
+        f"          <div style=\"font-size:0.88rem; color:#64748B; margin-top:4px;\">Full-Time &middot; {ctx['routes_type'].split()[0]} &middot; {ctx['routes']} &middot; {ctx['city_state']}</div>\n"
         "        </div>\n"
         f"        <div style=\"background:{ab}; color:{p}; font-family:'{fh}',sans-serif; font-size:1.25rem; font-weight:900;"
         f" padding:10px 24px; border-radius:8px; border:2px solid {p};\">{ctx['pay_range']}</div>\n"
@@ -2815,6 +2884,7 @@ def _contact_v1(ctx: dict) -> str:
     """Split: dark left with contact info, light right with form."""
     p = ctx["primary"]; pl = ctx["primary_light"]
     navy = ctx["navy"]; fh = ctx["font_heading"]
+    _addr = f"{ctx['address']}<br>{ctx['city_state']}" if ctx["address"] else ctx["city_state"]
     contact_rows = "".join(
         f"        <div style=\"display:flex; gap:16px; align-items:flex-start; margin-bottom:24px;\">\n"
         f"          <div style=\"width:42px; height:42px; border-radius:8px; background:rgba(255,255,255,0.07);"
@@ -2825,7 +2895,7 @@ def _contact_v1(ctx: dict) -> str:
         "        </div>\n"
         for icon, label, value in [
             ("\u2709\ufe0f", "Email", ctx["email"]),
-            ("\U0001f4cd", "Address", f"{ctx['address']}<br>{ctx['city_state']}"),
+            ("\U0001f4cd", "Address", _addr),
             ("\U0001f550", "Hours", "Dispatch available 24/7"),
         ]
     )
@@ -2857,6 +2927,7 @@ def _contact_v2(ctx: dict) -> str:
     """Dark full-width, centered, 3 info cards in a row, form below."""
     p = ctx["primary"]; pl = ctx["primary_light"]
     navy = ctx["navy"]; fh = ctx["font_heading"]
+    _addr = f"{ctx['address']}<br>{ctx['city_state']}" if ctx["address"] else ctx["city_state"]
     info_cards = "".join(
         f"<div style=\"background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);"
         f" border-radius:12px; padding:28px 24px; text-align:center;\">"
@@ -2864,7 +2935,7 @@ def _contact_v2(ctx: dict) -> str:
         f"<div style=\"font-family:'{fh}',sans-serif; font-size:0.85rem; font-weight:700; color:#fff; margin-bottom:6px;\">{label}</div>"
         f"<div style=\"font-size:0.88rem; color:rgba(255,255,255,0.45);\">{value}</div></div>"
         for icon, label, value in [
-            ("\U0001f4cd", "Location", ctx["city_state"]),
+            ("\U0001f4cd", "Location", _addr),
             ("\u2709\ufe0f", "Email", ctx["email"]),
             ("\U0001f550", "Availability", "Dispatch 24/7"),
         ]
@@ -2897,6 +2968,7 @@ def _contact_v3(ctx: dict) -> str:
     """Light bg, form on left, contact info cards stacked on right."""
     p = ctx["primary"]; ab = ctx["accent_bg"]; navy = ctx["navy"]
     g50 = ctx["gray_50"]; fh = ctx["font_heading"]
+    _addr = f"{ctx['address']}<br>{ctx['city_state']}" if ctx["address"] else ctx["city_state"]
     contact_cards = "".join(
         f"<div style=\"background:#fff; border:1px solid #E2E8F0; border-radius:10px; padding:24px;"
         " display:flex; gap:16px; align-items:flex-start; margin-bottom:16px;\">"
@@ -2905,7 +2977,7 @@ def _contact_v3(ctx: dict) -> str:
         f"<div style=\"font-size:0.88rem; color:#64748B;\">{value}</div></div></div>"
         for icon, label, value in [
             ("\u2709\ufe0f", "Email Us", ctx["email"]),
-            ("\U0001f4cd", "Our Location", f"{ctx['address']}<br>{ctx['city_state']}"),
+            ("\U0001f4cd", "Our Location", _addr),
             ("\U0001f550", "Dispatch Hours", "Available 24 hours a day, 7 days a week"),
         ]
     )
@@ -2939,13 +3011,14 @@ def _contact_v4(ctx: dict) -> str:
     """Minimal centered form with colored top border, contact details below."""
     p = ctx["primary"]; abl = ctx["accent_bg_light"]
     navy = ctx["navy"]; fh = ctx["font_heading"]
+    _addr = f"{ctx['address']}<br>{ctx['city_state']}" if ctx["address"] else ctx["city_state"]
     details = "".join(
         f"<div style=\"text-align:center;\"><div style=\"font-size:1.2rem; margin-bottom:4px;\">{icon}</div>"
         f"<div style=\"font-size:0.82rem; font-weight:700; color:{navy}; margin-bottom:2px;\">{label}</div>"
         f"<div style=\"font-size:0.82rem; color:#64748B;\">{value}</div></div>"
         for icon, label, value in [
             ("\u2709\ufe0f", "Email", ctx["email"]),
-            ("\U0001f4cd", "Location", ctx["city_state"]),
+            ("\U0001f4cd", "Location", _addr),
             ("\U0001f550", "Dispatch", "24/7 Available"),
         ]
     )

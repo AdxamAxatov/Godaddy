@@ -87,10 +87,12 @@ All commands work standalone (bot asks for input) or with an argument (e.g. `/se
 2. `go_to_create_email(domain)` — follows manual flow: Overview → Set up accounts → Get Started (M365) → enter domain → Continue → Create single email tab. Retries navigation up to 3 times if interrupted by GoDaddy redirects. Handles SSO login if session expired
 3. `get_expiration_dates()` — opens the dropdown (if it exists) and uses JS to read all options regardless of scroll/visibility. If only 1 date found, sets `_single_expiration = True` so `fill_form()` skips it. If no dropdown, reads static text
 4. `fill_form()` — fills all form fields. Selects "Do not share" for Link domains via JS click (dropdown has its own scroller). Skips expiration dropdown if `_single_expiration`
-5. `submit()` — clicks Create, then polls up to 25 seconds for a "No, Thanks" phone notification offer and dismisses it, then navigates back to Overview
+5. `submit()` — clicks Create, handles Microsoft Customer Agreement page (polls up to 20s for "Accept Agreement" button via JS), then polls up to 25 seconds for a "No, Thanks" phone notification offer and dismisses it, then navigates back to Overview
 6. `close()` — cleans up browser resources
 
-**`_dismiss_popups()`** handles: "Create an email account" modal (clicks Cancel with `force=True`), generic modal close buttons, recommendation overlays. Runs up to 3 rounds.
+**`_safe_click()` / `_safe_fill()`** — smart popup-aware wrappers for all important interactions. If a click or fill fails (usually because a popup is covering the element), they automatically call `_dismiss_popups()` to clear the blocker and retry (up to 3 attempts). This prevents the bot from getting stuck when popups appear at unexpected times.
+
+**`_dismiss_popups()`** handles: "Create an email account" modal (uses JS to find the modal container in the DOM, then clicks Cancel or X *inside* that container — avoids clicking wrong elements behind the popup), generic modal close buttons, recommendation overlays. Runs up to 3 rounds.
 
 ### website_generator.py
 
@@ -167,11 +169,12 @@ Fallback: if no numbered vars found, loads legacy single-var config (e.g. `GODAD
 - Bot follows the real manual flow (Overview → Set up accounts → M365 → domain → single email tab) to avoid suspicious direct URL navigation
 - Initial `page.goto()` in `go_to_create_email()` retries up to 3 times — GoDaddy sometimes redirects mid-navigation which causes Playwright to throw a navigation conflict error
 - "Link domains" dropdown has its own internal scroller — selecting "Do not share" must be done via JS (`document.querySelectorAll` + `.click()`) not Playwright locators
-- After clicking Create, bot polls 25 seconds for a phone number notification offer ("No, Thanks") before navigating back to Overview
+- After clicking Create, bot first checks for Microsoft Customer Agreement page (polls 20s for "Accept Agreement" button), then polls 25 seconds for a phone number notification offer ("No, Thanks") before navigating back to Overview
 - If a second `/email` is started while a browser is still open (user chose "Keep Open"), the existing browser is reused if it's the same account — avoids Playwright Sync API conflict from launching two instances
 - Expiration date: if only 1 date exists, bot auto-selects it and skips asking the user
 - Expiration dropdown options are read via JS (`[name="expirationDateDropDown"]`) after a 5-second wait — reads all DOM items regardless of scroll position
-- `_dismiss_popups()` runs up to 3 rounds and handles: "Create an email account" modal, generic close/X buttons, Cancel links
+- `_dismiss_popups()` runs up to 3 rounds and handles: "Create an email account" modal (via JS container-scoped detection), generic close/X buttons, Cancel links
+- All key interactions (clicks, fills) go through `_safe_click()`/`_safe_fill()` which auto-dismiss popups on failure and retry — prevents the bot from getting stuck when popups appear mid-flow
 
 ### GoDaddy Domain Purchase UI
 - Domain search starts from `account.godaddy.com/products` — uses the dashboard search box, not direct URL navigation

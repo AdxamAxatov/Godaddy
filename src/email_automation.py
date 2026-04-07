@@ -73,31 +73,68 @@ class GoDaddyEmailBot:
         for _ in range(3):
             found = False
 
-            # Check for "Create an email account" popup (has Cancel link + X close button)
+            # Check for "Create an email account" popup — this is the one that
+            # gets stuck the most. It's a modal with an email form, Cancel link,
+            # X close button, and "Create Email Account" button. We need to
+            # dismiss it WITHOUT accidentally clicking something behind it.
+            # Strategy: use JS to find the modal container first, then click
+            # Cancel or X specifically inside that container.
             try:
-                create_popup = page.locator('text="Create an email account"').first
-                if create_popup.is_visible(timeout=500):
-                    # Click Cancel link inside the popup — most reliable
-                    cancel = page.locator('text="Cancel"').first
-                    if cancel.is_visible(timeout=1000):
-                        cancel.click(force=True)
-                        page.wait_for_timeout(1000)
-                        dismissed = True
-                        log.debug("Dismissed 'Create an email account' popup via Cancel")
-                        continue
-                    # Fallback: click the X button via JS
-                    page.evaluate("""() => {
-                        const els = document.querySelectorAll('*');
-                        for (const el of els) {
-                            if (el.textContent.trim() === '×' || el.textContent.trim() === '✕' || el.getAttribute('aria-label')?.includes('lose')) {
-                                const rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0) { el.click(); return; }
+                popup_dismissed = page.evaluate("""() => {
+                    // Find the heading "Create an email account" anywhere on the page
+                    const allEls = document.querySelectorAll('*');
+                    for (const el of allEls) {
+                        if (el.childNodes.length === 1 &&
+                            el.textContent.trim() === 'Create an email account') {
+                            // Walk up to find the modal/dialog container
+                            let modal = el.closest('[class*="modal"], [class*="dialog"], [role="dialog"], [class*="overlay"], [class*="popup"]');
+                            if (!modal) {
+                                // No semantic container — walk up a few levels
+                                modal = el.parentElement?.parentElement?.parentElement;
+                            }
+                            if (!modal) continue;
+
+                            // Try 1: Click "Cancel" inside this modal
+                            const links = modal.querySelectorAll('a, button, span');
+                            for (const link of links) {
+                                if (link.textContent.trim() === 'Cancel') {
+                                    link.click();
+                                    return 'cancel';
+                                }
+                            }
+
+                            // Try 2: Click the X close button inside this modal
+                            const closeButtons = modal.querySelectorAll(
+                                'button[aria-label*="lose"], button[aria-label*="ismiss"], ' +
+                                '[class*="close"], svg'
+                            );
+                            for (const btn of closeButtons) {
+                                const rect = btn.getBoundingClientRect();
+                                if (rect.width > 0 && rect.height > 0) {
+                                    btn.click();
+                                    return 'close';
+                                }
+                            }
+
+                            // Try 3: Any clickable element that looks like a close/X
+                            for (const child of modal.querySelectorAll('*')) {
+                                const text = child.textContent.trim();
+                                if ((text === '×' || text === '✕' || text === 'X' || text === 'x') &&
+                                    child.children.length === 0) {
+                                    child.click();
+                                    return 'x';
+                                }
                             }
                         }
-                    }""")
+                    }
+                    return null;
+                }""")
+
+                if popup_dismissed:
                     page.wait_for_timeout(1000)
                     dismissed = True
-                    log.debug("Dismissed 'Create an email account' popup via X button")
+                    found = True
+                    log.debug(f"Dismissed 'Create an email account' popup via {popup_dismissed}")
                     continue
             except Exception:
                 pass
@@ -174,6 +211,84 @@ class GoDaddyEmailBot:
 
         return dismissed
 
+    def _safe_click(self, locator, description="element", timeout=5000, force=False, max_retries=3):
+        """Try to click a locator. If it fails, dismiss popups and retry.
+
+        This is the core of the "smart popup handling" — instead of only
+        checking for popups at a few hardcoded points in the flow, every
+        important click goes through this method. If a popup (like the
+        "Create an email account" recommendation) is covering the button
+        we want to click, Playwright throws an error. We catch that error,
+        call _dismiss_popups() to clear whatever is blocking, then retry
+        the click. Up to max_retries attempts before giving up.
+
+        Args:
+            locator: Playwright locator for the element to click.
+            description: Human-readable name for logging (e.g. "Continue button").
+            timeout: How long to wait for the element to be visible before each attempt.
+            force: If True, use Playwright's force click (bypasses actionability checks).
+            max_retries: Number of times to retry after popup dismissal.
+        """
+        page = self._page
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                # Make sure the element is visible first
+                locator.wait_for(state="visible", timeout=timeout)
+                locator.click(force=force)
+                if attempt > 0:
+                    log.info(f"Clicked {description} after {attempt} popup dismissal(s)")
+                return True
+            except Exception as e:
+                last_error = e
+                log.debug(f"Click on {description} failed (attempt {attempt + 1}/{max_retries}): {e}")
+
+                # The click failed — likely a popup is covering the element.
+                # Try to dismiss whatever is blocking and retry.
+                if attempt < max_retries - 1:
+                    dismissed = self._dismiss_popups()
+                    if dismissed:
+                        log.info(f"Dismissed popup blocking {description} — retrying click")
+                        page.wait_for_timeout(1000)
+                    else:
+                        # No popup found but click still failed — wait a bit
+                        # in case the page is still loading/animating
+                        page.wait_for_timeout(2000)
+
+        raise last_error
+
+    def _safe_fill(self, locator, value, description="field", timeout=5000, max_retries=3):
+        """Try to fill a field. If it fails (popup blocking), dismiss popups and retry.
+
+        Same idea as _safe_click but for typing into input fields. A popup
+        covering the input would prevent Playwright from focusing it, so we
+        catch that, clear the popup, and try again.
+        """
+        page = self._page
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                locator.wait_for(state="visible", timeout=timeout)
+                locator.fill(value)
+                if attempt > 0:
+                    log.info(f"Filled {description} after {attempt} popup dismissal(s)")
+                return True
+            except Exception as e:
+                last_error = e
+                log.debug(f"Fill on {description} failed (attempt {attempt + 1}/{max_retries}): {e}")
+
+                if attempt < max_retries - 1:
+                    dismissed = self._dismiss_popups()
+                    if dismissed:
+                        log.info(f"Dismissed popup blocking {description} — retrying fill")
+                        page.wait_for_timeout(1000)
+                    else:
+                        page.wait_for_timeout(2000)
+
+        raise last_error
+
     def _do_sso_login(self):
         """Perform the full SSO login flow (username → password → redirect)."""
         page = self._page
@@ -224,7 +339,7 @@ class GoDaddyEmailBot:
             return True
         return False
 
-    def go_to_create_email(self, domain: str):
+    def go_to_create_email(self, domain: str, _retry=0):
         """Follow the real manual flow to reach the Create New Email form.
 
         Step 1: Overview page → click "Set up accounts"
@@ -259,63 +374,102 @@ class GoDaddyEmailBot:
         page.wait_for_timeout(2000)
 
         # Click "Set up accounts"
-        page.locator('text="Set up accounts"').first.click()
+        self._safe_click(page.locator('text="Set up accounts"').first, "Set up accounts")
         page.wait_for_timeout(3000)
         log.info("Step 1: Clicked 'Set up accounts'")
 
         # ── Step 2: Choose account type → Microsoft 365 Email ──
+        # Some accounts show a type selector (M365 vs other), others skip straight
+        # to domain entry or the email form. Check which page we landed on.
         self._dismiss_popups()
-        page.locator('text="Microsoft 365 Email"').first.wait_for(state="visible", timeout=15000)
-        # Use JS to find the "Get Started" button inside the same card as "Microsoft 365 Email"
-        clicked = page.evaluate("""() => {
-            // Find the element containing "Microsoft 365 Email"
-            const all = document.querySelectorAll('*');
-            for (const el of all) {
-                if (el.childNodes.length === 1 && el.textContent.trim() === 'Microsoft 365 Email') {
-                    // Walk up to the card container and find its Get Started button
-                    let card = el.closest('[class*="card"], [class*="panel"], section, article') || el.parentElement.parentElement;
-                    const btn = card.querySelector('a, button');
-                    if (btn && btn.textContent.includes('Get Started')) {
-                        btn.click();
-                        return true;
+        page.wait_for_timeout(2000)
+
+        # Check if account type selector is present
+        m365_visible = False
+        try:
+            m365_visible = page.locator('text="Microsoft 365 Email"').first.is_visible(timeout=5000)
+        except Exception:
+            pass
+
+        if m365_visible:
+            # Use JS to find the "Get Started" button inside the same card as "Microsoft 365 Email"
+            clicked = page.evaluate("""() => {
+                const all = document.querySelectorAll('*');
+                for (const el of all) {
+                    if (el.childNodes.length === 1 && el.textContent.trim() === 'Microsoft 365 Email') {
+                        let card = el.closest('[class*="card"], [class*="panel"], section, article') || el.parentElement.parentElement;
+                        const btn = card.querySelector('a, button');
+                        if (btn && btn.textContent.includes('Get Started')) {
+                            btn.click();
+                            return true;
+                        }
                     }
                 }
-            }
-            return false;
-        }""")
-        if not clicked:
-            # Fallback: click the first Get Started (M365 is on the left)
-            page.locator('button:has-text("Get Started"), a:has-text("Get Started")').first.click()
-        page.wait_for_timeout(3000)
-        log.info("Step 2: Clicked 'Get Started' under Microsoft 365 Email")
+                return false;
+            }""")
+            if not clicked:
+                # Fallback: click the first Get Started (M365 is on the left)
+                self._safe_click(page.locator('button:has-text("Get Started"), a:has-text("Get Started")').first, "Get Started")
+            page.wait_for_timeout(3000)
+            log.info("Step 2: Clicked 'Get Started' under Microsoft 365 Email")
+        else:
+            log.info("Step 2: No account type selector — skipped (account goes straight to domain/form)")
 
         # ── Step 3: Choose domain → type domain, click Continue ──
+        # Some accounts skip straight to the email form (no domain entry step).
+        # Check if we're already on the form by looking for Username field.
         self._dismiss_popups()
-        domain_input = page.locator('input[type="text"], input[placeholder*="domain"], input[placeholder*="business"]').first
-        domain_input.wait_for(state="visible", timeout=15000)
-        domain_input.clear()
-        domain_input.fill(domain)
-        page.wait_for_timeout(1000)
+        already_on_form = False
+        try:
+            already_on_form = page.locator('text="Username"').first.is_visible(timeout=3000)
+        except Exception:
+            pass
 
-        # Wait for Continue button to stop showing "Loading..."
-        continue_btn = page.locator('button:has-text("Continue")').first
-        continue_btn.wait_for(state="visible", timeout=15000)
-        for _ in range(40):  # up to ~20 seconds
-            btn_text = continue_btn.inner_text()
-            if "loading" not in btn_text.lower():
-                break
-            page.wait_for_timeout(500)
-        continue_btn.click()
+        if not already_on_form:
+            domain_input = page.locator('input[type="text"], input[placeholder*="domain"], input[placeholder*="business"]').first
+            self._safe_fill(domain_input, domain, "domain input", timeout=15000)
+            page.wait_for_timeout(1000)
 
-        # Wait for the next page (email form) to load — up to 20 seconds
-        page.wait_for_timeout(5000)
-        for _ in range(30):  # up to ~15 more seconds
-            if page.locator('text="Create single email"').first.is_visible():
-                break
-            if page.locator('text="Username"').first.is_visible():
-                break
-            page.wait_for_timeout(500)
-        log.info(f"Step 3: Entered domain '{domain}' and clicked Continue")
+            # Wait for Continue button to stop showing "Loading..."
+            continue_btn = page.locator('button:has-text("Continue")').first
+            continue_btn.wait_for(state="visible", timeout=15000)
+            for _ in range(40):  # up to ~20 seconds
+                btn_text = continue_btn.inner_text()
+                if "loading" not in btn_text.lower():
+                    break
+                page.wait_for_timeout(500)
+            self._safe_click(continue_btn, "Continue button")
+
+            # Wait for the next page (email form) to load — up to 20 seconds
+            page.wait_for_timeout(5000)
+            reached_form = False
+            for _ in range(30):  # up to ~15 more seconds
+                if page.locator('text="Create single email"').first.is_visible():
+                    reached_form = True
+                    break
+                if page.locator('text="Username"').first.is_visible():
+                    reached_form = True
+                    break
+                page.wait_for_timeout(500)
+
+            # Check if GoDaddy redirected back to Overview
+            if not reached_form or "productivity.godaddy.com/#/" in page.url:
+                overview_check = False
+                try:
+                    overview_check = page.locator('text="Set up accounts"').first.is_visible(timeout=2000)
+                except Exception:
+                    pass
+                if overview_check:
+                    if _retry < 2:
+                        log.warning(f"GoDaddy redirected back to Overview after domain entry — retry {_retry + 1}/2")
+                        page.wait_for_timeout(3000)
+                        return self.go_to_create_email(domain, _retry=_retry + 1)
+                    else:
+                        raise Exception("GoDaddy keeps redirecting back to Overview after entering domain — could not reach email form")
+
+            log.info(f"Step 3: Entered domain '{domain}' and clicked Continue")
+        else:
+            log.info("Step 3: Already on email form — skipped domain entry")
 
         # ── Step 4: Switch to "Create single email" tab ──
         self._dismiss_popups()
@@ -332,7 +486,7 @@ class GoDaddyEmailBot:
                 el = page.locator(sel).first
                 if el.is_visible(timeout=2000):
                     el.scroll_into_view_if_needed()
-                    el.click(force=True)
+                    self._safe_click(el, "Create single email tab", force=True)
                     page.wait_for_timeout(3000)
                     log.info(f"Step 4: Clicked 'Create single email' tab via: {sel}")
                     tab_clicked = True
@@ -392,9 +546,22 @@ class GoDaddyEmailBot:
             pass
         raise RuntimeError("Could not find expiration date dropdown — check logs/debug_expiration.png")
 
-    def get_expiration_dates(self) -> list[str]:
+    def get_expiration_dates(self, _domain: str = "", _retry: int = 0) -> list[str]:
         """Scrape available expiration dates from the dropdown or static text."""
         page = self._page
+
+        # Check if GoDaddy redirected us away from the email form
+        on_overview = False
+        try:
+            on_overview = page.locator('text="Set up accounts"').first.is_visible(timeout=2000)
+        except Exception:
+            pass
+        if on_overview:
+            if _retry < 2 and _domain:
+                log.warning(f"GoDaddy redirected to Overview before expiration check — retrying ({_retry + 1}/2)")
+                self.go_to_create_email(_domain)
+                return self.get_expiration_dates(_domain=_domain, _retry=_retry + 1)
+            raise RuntimeError("GoDaddy keeps redirecting back to Overview page — could not reach email form")
 
         # First, try to find and open the dropdown
         try:
@@ -413,20 +580,25 @@ class GoDaddyEmailBot:
                 pass
 
             # Scrape options via JS — catches all items regardless of scroll/visibility
+            # Some accounts show "December 15, 2026  (2 Available)", others just "December 15, 2026"
             dates = page.evaluate("""() => {
+                const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+                function looksLikeDate(text) {
+                    return months.some(m => text.includes(m));
+                }
                 const dates = [];
                 // First try: items with name="expirationDateDropDown"
                 const byName = document.querySelectorAll('[name="expirationDateDropDown"]');
                 for (const el of byName) {
                     const text = el.textContent.trim();
-                    if (text && text.includes('Available')) dates.push(text);
+                    if (text && looksLikeDate(text)) dates.push(text);
                 }
                 if (dates.length > 0) return dates;
-                // Fallback: any role="option" or dropdown-item with "Available"
+                // Fallback: any role="option" or dropdown-item that looks like a date
                 const fallback = document.querySelectorAll('[role="option"], .dropdown-item, [class*="dropdown"] li, [class*="select"] li');
                 for (const el of fallback) {
                     const text = el.textContent.trim();
-                    if (text && text.includes('Available')) dates.push(text);
+                    if (text && looksLikeDate(text)) dates.push(text);
                 }
                 return dates;
             }""")
@@ -459,13 +631,12 @@ class GoDaddyEmailBot:
             if label.is_visible(timeout=3000):
                 parent = page.locator('text="Renewal/Expiration date" >> ..').first
                 parent_text = parent.text_content().strip()
-                if "Available" in parent_text:
-                    date_text = parent_text.replace("Renewal/Expiration date", "").strip()
-                    if date_text:
-                        log.info(f"Single expiration date (no dropdown): {date_text}")
-                        self._single_expiration = True
-                        self._expiration_dates = [date_text]
-                        return [date_text]
+                date_text = parent_text.replace("Renewal/Expiration date", "").strip()
+                if date_text:
+                    log.info(f"Single expiration date (no dropdown): {date_text}")
+                    self._single_expiration = True
+                    self._expiration_dates = [date_text]
+                    return [date_text]
         except Exception:
             pass
 
@@ -477,11 +648,11 @@ class GoDaddyEmailBot:
         page = self._page
 
         # Username (email prefix before @domain.com)
-        page.get_by_label("Username").fill(username)
+        self._safe_fill(page.get_by_label("Username"), username, "Username")
 
         # First name / Last name
-        page.get_by_label("First name").fill(first_name)
-        page.get_by_label("Last name").fill(last_name)
+        self._safe_fill(page.get_by_label("First name"), first_name, "First name")
+        self._safe_fill(page.get_by_label("Last name"), last_name, "Last name")
 
         # Expiration date dropdown — skip if only one option
         if not getattr(self, '_single_expiration', False):
@@ -539,15 +710,16 @@ class GoDaddyEmailBot:
 
         # Administrator permissions (radio buttons)
         if admin:
-            page.get_by_label("Yes").click()
+            self._safe_click(page.get_by_label("Yes"), "Admin Yes radio")
         else:
-            page.get_by_label("No").click()
+            self._safe_click(page.get_by_label("No"), "Admin No radio")
 
         # Password
-        page.get_by_label("Create a password").fill(password)
+        self._safe_fill(page.get_by_label("Create a password"), password, "Password")
 
         # Send account info to
         notify_field = page.get_by_label("Send account info to")
+        self._safe_click(notify_field, "Send account info field")
         notify_field.clear()
         notify_field.fill(notify_email)
 
@@ -562,9 +734,44 @@ class GoDaddyEmailBot:
     def submit(self):
         """Click the Create button, dismiss phone number offer, then navigate back to Overview."""
         page = self._page
-        page.get_by_role("button", name="Create").click()
+        self._safe_click(page.get_by_role("button", name="Create"), "Create button")
         page.wait_for_load_state("domcontentloaded")
         log.info("Create button clicked")
+
+        # Handle Microsoft Customer Agreement Acknowledgment page
+        # GoDaddy shows this after clicking Create on some accounts — it loads a
+        # heavy embedded Microsoft doc viewer, so the page can take a while.
+        # We poll for up to 20 seconds looking for the Accept Agreement button,
+        # checking every second. Using JS to find ANY element with that text,
+        # not just <button> or <a>, since GoDaddy could render it as anything.
+        agreement_clicked = False
+        for _ in range(20):
+            page.wait_for_timeout(1000)
+            try:
+                clicked = page.evaluate("""() => {
+                    const all = document.querySelectorAll('button, a, input[type="submit"], [role="button"]');
+                    for (const el of all) {
+                        if (el.textContent.trim() === 'Accept Agreement' || el.value === 'Accept Agreement') {
+                            const rect = el.getBoundingClientRect();
+                            if (rect.width > 0 && rect.height > 0) {
+                                el.click();
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }""")
+                if clicked:
+                    log.info("Clicked 'Accept Agreement' on Microsoft Customer Agreement page")
+                    page.wait_for_load_state("domcontentloaded")
+                    page.wait_for_timeout(10000)
+                    agreement_clicked = True
+                    break
+            except Exception:
+                continue
+
+        if not agreement_clicked:
+            log.debug("No Microsoft Customer Agreement page appeared within 20 seconds")
 
         # Wait for the phone number notification offer to appear (up to 25 seconds)
         # GoDaddy often offers to notify via phone after email creation

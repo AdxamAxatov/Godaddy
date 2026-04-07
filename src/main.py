@@ -20,6 +20,7 @@ import sys
 import re
 import time
 import tempfile
+import random
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -733,7 +734,7 @@ def handle_message(chat_id, text, message_id=None):
             pending_email.pop(chat_id)
             _start_email_flow(chat_id, domain)
             return
-        if step in ("awaiting_username", "awaiting_name", "awaiting_password", "awaiting_notify_email"):
+        if step in ("awaiting_name", "awaiting_notify_email"):
             _handle_email_input(chat_id, raw_text, message_id)
             return
 
@@ -811,20 +812,11 @@ def handle_message(chat_id, text, message_id=None):
         pending_generate[chat_id] = {"step": "awaiting_info"}
         tg_send(chat_id,
                 "🏗️ *Website Generator*\n\n"
-                "Send all info in one message using this format:\n\n"
+                "Send company details in one message:\n\n"
                 "`Company: 2-3 Logistics Corp\n"
-                "Logo: 2-3 Logistics\n"
-                "Domain: 2-3logisticscorp.com\n"
                 "Email: info@2-3logisticscorp.com\n"
-                "Address: 508 Linden Dr\n"
-                "City: Round Lake, IL 60073\n"
-                "Job: OTR Company Driver — CDL-A\n"
-                "Pay: $1,300 – $1,600 / week\n"
-                "Home: Home every 2 weeks for 2 days\n"
-                "Home Short: 2 Weeks Out\n"
-                "Home Detail: Home 2 Days\n"
-                "Experience: 6 months\n"
-                "Perks: Weekly direct deposit, Health insurance, 401(k) with match`")
+                "Address: 508 Linden Dr, Round Lake, IL 60073`\n\n"
+                "_Domain extracted from email. Job info generated automatically._")
         return
 
     # Route to generate flow if user is in one
@@ -886,22 +878,22 @@ def handle_message(chat_id, text, message_id=None):
 
 
 def _start_domain_purchase(chat_id, domain, account_idx=None):
-    """Start browser-based domain purchase flow."""
+    """Start API-based domain purchase flow."""
     log.info(f"Domain purchase requested: {domain}")
 
-    if len(GODADDY_ACCOUNTS) == 0:
-        tg_send(chat_id, "🔴 No GoDaddy accounts configured in `.env`")
+    if len(GODADDY_API_ACCOUNTS) == 0:
+        tg_send(chat_id, "🔴 No GoDaddy API accounts configured in `.env`")
         pending_buy.pop(chat_id, None)
         return
 
     # If multiple accounts and none selected yet, show picker
-    if account_idx is None and len(GODADDY_ACCOUNTS) > 1:
+    if account_idx is None and len(GODADDY_API_ACCOUNTS) > 1:
         pending_buy[chat_id] = pending_buy.get(chat_id, {})
         pending_buy[chat_id]["step"] = "awaiting_buy_account"
         pending_buy[chat_id]["domain"] = domain
         buttons = []
-        for i, acc in enumerate(GODADDY_ACCOUNTS):
-            buttons.append([{"text": acc["email"], "callback_data": f"buy_acc:{i}:{domain}"}])
+        for i, acc in enumerate(GODADDY_API_ACCOUNTS):
+            buttons.append([{"text": acc["label"], "callback_data": f"buy_acc:{i}:{domain}"}])
         tg_send(chat_id,
                 f"💰 *Purchase* `{domain}`\n\nWhich GoDaddy account?",
                 reply_markup={"inline_keyboard": buttons})
@@ -909,115 +901,66 @@ def _start_domain_purchase(chat_id, domain, account_idx=None):
 
     if account_idx is None:
         account_idx = 0
-    account = GODADDY_ACCOUNTS[account_idx]
+    account = GODADDY_API_ACCOUNTS[account_idx]
 
-    tg_send(chat_id, f"🌐 Launching browser to search for `{domain}`...")
+    tg_send(chat_id, f"🔍 Checking availability for `{domain}`...")
 
     try:
-        from domain_automation import GoDaddyDomainBot
+        available, price = check_domain_availability(domain, account)
 
-        bot = GoDaddyDomainBot(
-            email=account["email"],
-            password=account["password"],
-            account_idx=account_idx,
-            headless=False,
-        )
-        bot.open()
-
-        tg_send(chat_id, f"🔍 Searching for `{domain}`...")
-        result = bot.search_domain(domain)
-
-        if not result["available"]:
-            tg_send(chat_id, f"❌ `{domain}` is not available for purchase. Browser left open — use `/close` when done.")
-            active_browser[chat_id] = bot
-            pending_buy.pop(chat_id, None)
+        if not available:
+            pending_buy[chat_id]["step"] = "awaiting_domain"
+            tg_send(chat_id, f"❌ `{domain}` is not available.",
+                    reply_markup={"inline_keyboard": [[
+                        {"text": "🔄 Try Another Domain", "callback_data": "buy_retry_domain"},
+                        {"text": "❌ Cancel", "callback_data": "buy_cancel"},
+                    ]]})
             return
 
-        price = result["price"] or "unknown"
+        price_str = f"${price:.2f}" if price else "unknown"
         pending_buy[chat_id] = {
             "step": "awaiting_buy_confirm",
             "domain": domain,
             "account_idx": account_idx,
-            "browser_bot": bot,
-            "price": price,
+            "price": price_str,
         }
 
-        # Screenshot the search results
-        screenshot_path = os.path.join(tempfile.gettempdir(), f"domain_search_{chat_id}.png")
-        bot.screenshot(screenshot_path)
-        tg_send_photo(chat_id, screenshot_path,
-                      caption=f"✅ `{domain}` is available — *{price}/yr* (1 Year)")
-        try:
-            os.remove(screenshot_path)
-        except Exception:
-            pass
-
         tg_send(chat_id,
-                f"Proceed with purchase?",
+                f"✅ `{domain}` is available — *{price_str}/yr* (1 Year)\n\nProceed with purchase?",
                 reply_markup={"inline_keyboard": [[
-                    {"text": "💰 Proceed to Buy", "callback_data": "buy_proceed"},
+                    {"text": "💰 Proceed to Purchase", "callback_data": "buy_proceed"},
                     {"text": "❌ Cancel", "callback_data": "buy_cancel"},
                 ]]})
 
     except Exception as e:
-        log.error(f"Domain search error: {e}")
-        tg_send(chat_id, f"🔴 Error searching for domain:\n`{e}`\n\nBrowser left open — use `/close` when done.")
-        if bot:
-            active_browser[chat_id] = bot
+        log.error(f"Domain availability check error: {e}")
+        tg_send(chat_id, f"🔴 Error checking domain:\n`{e}`")
         pending_buy.pop(chat_id, None)
 
 
-def _proceed_buy_to_checkout(chat_id):
-    """Drive the browser from search results through cart to checkout page."""
+def _execute_domain_purchase(chat_id):
+    """Purchase the domain via GoDaddy API."""
     state = pending_buy.get(chat_id, {})
-    bot = state.get("browser_bot")
     domain = state.get("domain", "unknown")
-
-    if not bot:
-        tg_send(chat_id, "🔴 Browser session expired. Start over with `/buy`.")
-        pending_buy.pop(chat_id, None)
-        return
+    account_idx = state.get("account_idx", 0)
+    account = GODADDY_API_ACCOUNTS[account_idx]
 
     try:
-        tg_send(chat_id, "🛒 Adding to cart...")
-        bot.select_term_and_add()
-        bot.go_to_cart()
-
-        tg_send(chat_id, "⏭ Skipping extras...")
-        bot.skip_extras()
-
-        tg_send(chat_id, "📋 Reviewing cart...")
-        bot.prepare_checkout()
-
-        # Screenshot the checkout page
-        screenshot_path = os.path.join(tempfile.gettempdir(), f"domain_checkout_{chat_id}.png")
-        bot.screenshot(screenshot_path)
-        tg_send_photo(chat_id, screenshot_path,
-                      caption=f"🔒 Reached checkout for `{domain}`")
-        try:
-            os.remove(screenshot_path)
-        except Exception:
-            pass
-
+        tg_send(chat_id, f"💳 Purchasing `{domain}`...")
+        result = purchase_domain(domain, account)
+        log.info(f"Domain purchased: {domain} — {result}")
         tg_send(chat_id,
-                f"✅ *Checkout ready for* `{domain}`\n\n"
-                f"Browser is at the checkout page. Use `/close` when done.")
-
-        # Keep browser open at checkout — move to active_browser
-        active_browser[chat_id] = bot
-        state.pop("browser_bot", None)
+                f"✅ *Domain purchased!* `{domain}`\n\n"
+                f"Want to set up hosting now?",
+                reply_markup={"inline_keyboard": [[
+                    {"text": "🌐 Setup Website", "callback_data": f"setup:{domain}"},
+                    {"text": "❌ Done", "callback_data": "buy_cancel"},
+                ]]})
         pending_buy.pop(chat_id, None)
 
     except Exception as e:
-        log.error(f"Domain purchase flow error: {e}")
-        # Take debug screenshot
-        try:
-            bot.screenshot(f"{os.path.dirname(os.path.abspath(__file__))}/../logs/debug_domain_purchase.png")
-        except Exception:
-            pass
-        tg_send(chat_id, f"🔴 Error during purchase flow:\n`{e}`\n\nBrowser left open — use `/close` when done.")
-        active_browser[chat_id] = bot
-        state.pop("browser_bot", None)
+        log.error(f"Domain purchase error for '{domain}': {e}")
+        tg_send(chat_id, f"🔴 Purchase failed for `{domain}`:\n`{e}`")
         pending_buy.pop(chat_id, None)
 
 
@@ -1028,11 +971,8 @@ def _proceed_buy_to_checkout(chat_id):
 # Field mapping: label in user message → internal field name
 _GENERATE_FIELDS = {
     "company": "company_name",
-    "logo": "company_short",
-    "domain": "domain",
     "email": "email",
-    "address": "address",
-    "city": "city_state",
+    "address": "full_address",
     "job": "job_title",
     "pay": "pay_range",
     "home": "home_time",
@@ -1042,7 +982,7 @@ _GENERATE_FIELDS = {
     "perks": "perks",
 }
 
-_GENERATE_REQUIRED = ["company_name", "domain", "email", "city_state", "job_title", "pay_range"]
+_GENERATE_REQUIRED = ["company_name", "email", "full_address"]
 
 
 def _handle_generate_input(chat_id, raw_text):
@@ -1073,17 +1013,128 @@ def _handle_generate_input(chat_id, raw_text):
 
     # Check required fields
     missing = [label for label, field in [
-        ("Company", "company_name"), ("Domain", "domain"), ("Email", "email"),
-        ("City", "city_state"), ("Job", "job_title"), ("Pay", "pay_range"),
+        ("Company", "company_name"), ("Email", "email"), ("Address", "full_address"),
     ] if field not in parsed]
 
     if missing:
         tg_send(chat_id, f"⚠️ Missing required fields: {', '.join(missing)}\n\nPlease resend with all fields.")
         return
 
-    # Merge parsed into state and generate
+    # Derive domain from email (everything after @)
+    email = parsed["email"]
+    if "@" in email:
+        parsed["domain"] = email.split("@", 1)[1]
+    else:
+        tg_send(chat_id, "⚠️ Invalid email format. Must contain `@`.")
+        return
+
+    # Use company name for logo text
+    parsed["company_short"] = parsed["company_name"]
+
+    # Split full address into street + city/state/zip at first comma
+    full_addr = parsed.pop("full_address")
+    if "," in full_addr:
+        street, city_part = full_addr.split(",", 1)
+        parsed["address"] = street.strip()
+        parsed["city_state"] = city_part.strip()
+    else:
+        parsed["address"] = ""
+        parsed["city_state"] = full_addr.strip()
+
+    # Merge parsed into state, then ask for route type
     state.update(parsed)
-    _finish_generate(chat_id)
+    state["step"] = "awaiting_route_type"
+    tg_send(chat_id, "🛣️ *Route type for this job?*",
+            reply_markup={"inline_keyboard": [[
+                {"text": "🚛 OTR", "callback_data": "gen_route:otr"},
+                {"text": "🏠 Regional", "callback_data": "gen_route:regional"},
+                {"text": "🎲 Random", "callback_data": "gen_route:random"},
+            ]]})
+
+
+def _generate_random_job_info(route_choice="random"):
+    """Generate random job info for website and job description."""
+
+    # ── Job title ──
+    otr_titles = [
+        "OTR CDL-A Truck Driver",
+        "OTR CDL-A Company Driver",
+        "OTR Class A Driver",
+        "OTR Company Driver — CDL-A",
+        "CDL-A OTR Truck Driver",
+    ]
+    regional_titles = [
+        "Regional CDL-A Truck Driver",
+        "Regional CDL-A Company Driver",
+        "Regional Class A Driver",
+        "Regional Company Driver — CDL-A",
+        "CDL-A Regional Truck Driver",
+    ]
+    if route_choice == "otr":
+        is_otr = True
+    elif route_choice == "regional":
+        is_otr = False
+    else:
+        is_otr = random.random() < 0.5
+    job_title = random.choice(otr_titles if is_otr else regional_titles)
+
+    # ── Pay range ($1,200–$1,800, spread of $200–$300) ──
+    spread = random.choice([200, 250, 300])
+    low = random.randrange(1200, 1800 - spread + 1, 50)
+    high = low + spread
+    pay_range = f"${low:,} – ${high:,} / week"
+
+    # ── Home time (based on job type) ──
+    if is_otr:
+        weeks_out = random.choice([2, 3, 4])
+        days_home = random.choice([2, 3]) if weeks_out <= 3 else random.choice([3, 4, 5, 7])
+        home_time = f"Home every {weeks_out} weeks for {days_home} days"
+        home_time_short = f"{weeks_out} Weeks Out"
+        home_time_detail = f"Home {days_home} Days"
+        routes_type = "OTR Routes"
+    else:
+        home_options = [
+            ("Home weekly", "Weekly", "Home Weekends"),
+            ("Home every weekend", "Weekly", "Home Weekends"),
+            ("Home every 1-2 weeks", "1-2 Weeks Out", "Home 2 Days"),
+            ("Home every week for 2 days", "Weekly", "Home 2 Days"),
+        ]
+        home_time, home_time_short, home_time_detail = random.choice(home_options)
+        routes_type = "Regional Routes"
+
+    # ── Experience ──
+    exp_options = ["6 months", "1 year", "1 year", "1 year", "2 years"]  # weighted toward 1 year
+    min_experience = random.choice(exp_options)
+    # Short version for card display
+    exp_short_map = {"6 months": "6 Mo. Exp", "1 year": "1 Yr. Exp", "2 years": "2 Yr. Exp"}
+    fourth_card_value = exp_short_map.get(min_experience, min_experience)
+
+    # ── Perks (6–8 total, always include 401k + one insurance) ──
+    insurance = random.choice(["Health insurance", "Dental & Vision insurance"])
+    fixed_perks = ["401(k) with match", insurance]
+    other_perks = [
+        "Fuel card", "Fuel discount", "Paid orientation",
+        "Paid time off", "Passenger ride along program", "Performance bonus",
+        "Pet & Rider program", "Referral program", "Safety equipment provided",
+    ]
+    random.shuffle(other_perks)
+    num_other = random.randint(4, 6)  # 2 fixed + 4-6 others = 6-8 total
+    perks = fixed_perks + other_perks[:num_other]
+    random.shuffle(perks)
+
+    return {
+        "job_title": job_title,
+        "pay_range": pay_range,
+        "home_time": home_time,
+        "home_time_short": home_time_short,
+        "home_time_detail": home_time_detail,
+        "min_experience": min_experience,
+        "fourth_card_value": fourth_card_value,
+        "fourth_card_label": "Min. Required",
+        "routes": "Multi-State" if not is_otr else "48 States",
+        "routes_type": routes_type,
+        "perks": perks,
+    }
 
 
 def _finish_generate(chat_id):
@@ -1094,8 +1145,11 @@ def _finish_generate(chat_id):
     try:
         from website_generator import generate_website_from_blocks, generate_job_description
 
-        # Build info with defaults for optional fields
+        # Build info: company details from user, job info auto-generated
         company = state["company_name"]
+        route_choice = state.get("route_type", "random")
+        job_info = _generate_random_job_info(route_choice=route_choice)
+
         info = {
             "company_name": company,
             "company_short": state.get("company_short", company.split()[0]),
@@ -1103,18 +1157,18 @@ def _finish_generate(chat_id):
             "email": state["email"],
             "address": state.get("address", ""),
             "city_state": state["city_state"],
-            "job_title": state["job_title"],
-            "pay_range": state["pay_range"],
-            "home_time": state.get("home_time", ""),
-            "home_time_short": state.get("home_time_short", ""),
-            "home_time_detail": state.get("home_time_detail", ""),
-            "min_experience": state.get("min_experience", "6 months"),
-            "fourth_card_value": state.get("min_experience", "6 Mo. Exp"),
-            "fourth_card_label": "Min. Required",
-            "routes": "48 States",
-            "routes_type": "OTR Routes",
-            "perks": state.get("perks", []),
         }
+        info.update(job_info)
+
+        # Show what was auto-generated
+        perks_str = ", ".join(info["perks"])
+        tg_send(chat_id,
+                f"🎲 *Auto-generated job info:*\n"
+                f"Job: {info['job_title']}\n"
+                f"Pay: {info['pay_range']}\n"
+                f"Home: {info['home_time']}\n"
+                f"Experience: {info['min_experience']}\n"
+                f"Perks: {perks_str}")
 
         # Generate website zip
         zip_path = generate_website_from_blocks(info)
@@ -1400,11 +1454,11 @@ def _start_email_flow(chat_id, domain):
     if len(GODADDY_ACCOUNTS) == 1:
         # Only one account — skip selection
         pending_email[chat_id]["account_idx"] = 0
-        pending_email[chat_id]["step"] = "awaiting_username"
+        pending_email[chat_id]["step"] = "awaiting_name"
         tg_send(chat_id,
                 f"📧 *Email Setup for* `{domain}`\n\n"
-                f"What username do you want?\n"
-                f"Example: type `info` for `info@{domain}`")
+                f"👤 First and last name?\n"
+                f"Example: `John Doe`")
     elif len(GODADDY_ACCOUNTS) > 1:
         # Show account picker
         buttons = []
@@ -1424,22 +1478,15 @@ def _handle_email_input(chat_id, raw_text, message_id=None):
     state = pending_email[chat_id]
     step = state["step"]
 
-    if step == "awaiting_username":
-        username = raw_text.strip().lower().replace(" ", "")
-        state["username"] = username
-        state["step"] = "awaiting_name"
-        tg_send(chat_id,
-                f"Email: `{username}@{state['domain']}`\n\n"
-                f"👤 First and last name?\n"
-                f"Example: `John Doe`")
-
-    elif step == "awaiting_name":
+    if step == "awaiting_name":
         parts = raw_text.strip().split(None, 1)
         if len(parts) < 2:
             tg_send(chat_id, "⚠️ Need both first and last name. Example: `John Doe`")
             return
         state["first_name"] = parts[0]
         state["last_name"] = parts[1]
+        state["username"] = parts[0].lower()
+        tg_send(chat_id, f"Email: `{state['username']}@{state['domain']}`")
         state["step"] = "awaiting_admin"
         tg_send(chat_id,
                 "🔐 *Administrator permissions?*",
@@ -1448,24 +1495,6 @@ def _handle_email_input(chat_id, raw_text, message_id=None):
                         {"text": "Yes", "callback_data": "email_admin:yes"},
                         {"text": "No", "callback_data": "email_admin:no"},
                     ]]
-                })
-
-    elif step == "awaiting_password":
-        state["password"] = raw_text.strip()
-        state["step"] = "awaiting_notify_email"
-        # Delete the password message for security
-        if message_id:
-            try:
-                tg_delete_message(chat_id, message_id)
-            except Exception:
-                pass
-        tg_send(chat_id,
-                "📬 Send account info to which email?",
-                reply_markup={
-                    "inline_keyboard": [
-                        [{"text": "smfleet02@gmail.com", "callback_data": "email_notify:smfleet02@gmail.com"}],
-                        [{"text": "phillhr57@gmail.com", "callback_data": "email_notify:phillhr57@gmail.com"}],
-                    ]
                 })
 
     elif step == "awaiting_notify_email":
@@ -1480,11 +1509,12 @@ def _launch_email_browser(chat_id):
     account_idx = state.get("account_idx", 0)
 
     account = GODADDY_ACCOUNTS[account_idx]
+    bot = None
 
     try:
         from email_automation import GoDaddyEmailBot
 
-        # Reuse existing browser if it's open for the same account
+        # Reuse existing browser if it's open for the same account (this chat)
         existing = active_browser.get(chat_id)
         if existing and getattr(existing, 'account_idx', None) == account_idx and existing._page:
             bot = existing
@@ -1492,7 +1522,7 @@ def _launch_email_browser(chat_id):
             tg_send(chat_id, f"⏳ Reusing open browser, navigating to email form...")
             log.info(f"Reusing existing browser for account {account_idx}")
         else:
-            # Close old browser if it's a different account or stale
+            # Close old browser if it's a different account or stale (this chat)
             if existing:
                 try:
                     existing.close()
@@ -1500,6 +1530,18 @@ def _launch_email_browser(chat_id):
                     pass
                 active_browser.pop(chat_id, None)
                 log.info("Closed previous browser (different account or stale)")
+
+            # Check if another chat has a browser open on the same account
+            # (only one browser can lock a profile at a time)
+            for other_cid, other_bot in list(active_browser.items()):
+                if getattr(other_bot, 'account_idx', None) == account_idx:
+                    log.info(f"Closing browser left open by chat {other_cid} on account {account_idx}")
+                    try:
+                        other_bot.close()
+                    except Exception:
+                        pass
+                    active_browser.pop(other_cid, None)
+                    tg_send(other_cid, f"ℹ️ Browser was closed — another user started `/email` on the same account.")
 
             tg_send(chat_id, f"⏳ Opening browser and navigating to GoDaddy ({account['email']})...")
             bot = GoDaddyEmailBot(
@@ -1512,7 +1554,7 @@ def _launch_email_browser(chat_id):
 
         bot.go_to_create_email(domain)
 
-        dates = bot.get_expiration_dates()
+        dates = bot.get_expiration_dates(_domain=domain)
         state["browser_bot"] = bot
         state["expiration_dates"] = dates
 
@@ -1534,10 +1576,13 @@ def _launch_email_browser(chat_id):
 
     except Exception as e:
         log.error(f"Email browser automation failed: {e}")
-        tg_send(chat_id, f"🔴 Browser automation failed:\n`{e}`")
-        cleanup = pending_email.pop(chat_id, {})
-        if cleanup.get("browser_bot"):
-            cleanup["browser_bot"].close()
+        pending_email.pop(chat_id, None)
+        # Keep browser open for reuse or manual inspection
+        if bot and bot._page:
+            active_browser[chat_id] = bot
+            tg_send(chat_id, f"🔴 Browser automation failed:\n`{e}`\n\nBrowser left open — retry with `/email` or `/close` when done.")
+        else:
+            tg_send(chat_id, f"🔴 Browser automation failed:\n`{e}`")
 
 
 def _fill_and_confirm(chat_id, message_id):
@@ -1719,25 +1764,57 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
         tg_send(chat_id, "What domain? Example: `mysite.com`")
         return
 
+    if data == "buy_retry_domain":
+        pending_buy[chat_id] = pending_buy.get(chat_id, {})
+        pending_buy[chat_id]["step"] = "awaiting_domain"
+        tg_edit_message(chat_id, message_id, "🔄 Trying another domain.")
+        tg_send(chat_id, "What domain? Example: `mysite.com`")
+        return
+
+    if data.startswith("gen_route:"):
+        route = data.split(":", 1)[1]  # otr, regional, or random
+        state = pending_generate.get(chat_id)
+        if not state:
+            tg_edit_message(chat_id, message_id, "⚠️ No active generate flow.")
+            return
+        label = {"otr": "🚛 OTR", "regional": "🏠 Regional", "random": "🎲 Random"}.get(route, route)
+        tg_edit_message(chat_id, message_id, f"Route type: {label}")
+        state["route_type"] = route
+        _finish_generate(chat_id)
+        return
+
     if data.startswith("buy_acc:"):
         # Account picker callback: buy_acc:IDX:domain
         parts = data.split(":", 2)
         idx = int(parts[1])
         domain = parts[2]
-        tg_edit_message(chat_id, message_id, f"Account: {GODADDY_ACCOUNTS[idx]['email']}")
+        tg_edit_message(chat_id, message_id, f"Account: {GODADDY_API_ACCOUNTS[idx]['label']}")
         _start_domain_purchase(chat_id, domain, account_idx=idx)
         return
 
     if data == "buy_proceed":
-        tg_edit_message(chat_id, message_id, "⏳ Proceeding to checkout...")
-        _proceed_buy_to_checkout(chat_id)
+        state = pending_buy.get(chat_id, {})
+        domain = state.get("domain", "unknown")
+        price = state.get("price", "unknown")
+        tg_edit_message(chat_id, message_id, f"💰 `{domain}` — {price}/yr")
+        tg_send(chat_id,
+                f"⚠️ *Confirm purchase*\n\n"
+                f"Domain: `{domain}`\n"
+                f"Price: *{price}/yr*\n\n"
+                f"This will charge your GoDaddy account. Buy now?",
+                reply_markup={"inline_keyboard": [[
+                    {"text": "💰 Buy Now", "callback_data": "buy_confirm"},
+                    {"text": "❌ Cancel", "callback_data": "buy_cancel"},
+                ]]})
+        return
+
+    if data == "buy_confirm":
+        tg_edit_message(chat_id, message_id, "⏳ Purchasing...")
+        _execute_domain_purchase(chat_id)
         return
 
     if data == "buy_cancel":
-        state = pending_buy.pop(chat_id, {})
-        bot = state.get("browser_bot")
-        if bot:
-            bot.close()
+        pending_buy.pop(chat_id, None)
         tg_edit_message(chat_id, message_id, "🚫 Purchase cancelled.")
         return
 
@@ -1811,12 +1888,12 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
             return
         idx = int(data.split(":")[1])
         state["account_idx"] = idx
-        state["step"] = "awaiting_username"
+        state["step"] = "awaiting_name"
         acc = GODADDY_ACCOUNTS[idx]
         tg_edit_message(chat_id, message_id, f"Account: {acc['email']}")
         tg_send(chat_id,
-                f"What username do you want?\n"
-                f"Example: type `info` for `info@{state['domain']}`")
+                f"👤 First and last name?\n"
+                f"Example: `John Doe`")
         return
 
     if data.startswith("email_admin:"):
@@ -1825,9 +1902,17 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
         if not state:
             return
         state["admin"] = (choice == "yes")
-        state["step"] = "awaiting_password"
+        state["password"] = "Iamawesome98"
+        state["step"] = "awaiting_notify_email"
         tg_edit_message(chat_id, message_id, f"Admin: {'Yes' if state['admin'] else 'No'}")
-        tg_send(chat_id, "🔑 Create a password for this email account:")
+        tg_send(chat_id,
+                "📬 Send account info to which email?",
+                reply_markup={
+                    "inline_keyboard": [
+                        [{"text": "smfleet02@gmail.com", "callback_data": "email_notify:smfleet02@gmail.com"}],
+                        [{"text": "phillhr57@gmail.com", "callback_data": "email_notify:phillhr57@gmail.com"}],
+                    ]
+                })
         return
 
     if data.startswith("email_notify:"):
