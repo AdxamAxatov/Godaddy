@@ -4,6 +4,7 @@ Produces index.html + images/ folder as a zip file.
 Also generates an Indeed job description (markdown).
 """
 
+import json
 import random
 import os
 import shutil
@@ -16,6 +17,45 @@ _ASSETS_DIR = Path(__file__).parent.parent / "assets" / "stock_images"
 _HERO_IMAGES = sorted(_ASSETS_DIR.glob("hero_*.jpg"))
 _ABOUT_IMAGES = sorted(_ASSETS_DIR.glob("about_*.jpg"))
 _COVERAGE_IMAGES = sorted(_ASSETS_DIR.glob("coverage_*.jpg"))
+
+# ── No-repeat image state ──────────────────────────────
+# Persists last-used image(s) per slot across renders so the next site
+# won't reuse the exact image that the previous site used.
+_IMG_STATE_FILE = Path(__file__).parent.parent / "logs" / "last_used_images.json"
+
+
+def _load_img_state() -> dict:
+    try:
+        return json.loads(_IMG_STATE_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_img_state(state: dict) -> None:
+    try:
+        _IMG_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _IMG_STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
+    except OSError:
+        pass  # best-effort; never break rendering on state-file issues
+
+
+def _pick_unique(pool_paths, count: int, slot_key: str, state: dict, fallback: str) -> list:
+    """Pick `count` unique image names from pool, avoiding the slot's last-used set.
+    Falls back gracefully if the pool is smaller than count."""
+    available = [p.name for p in pool_paths]
+    if not available:
+        return [fallback] * count
+    last = state.get(slot_key, [])
+    if isinstance(last, str):
+        last = [last]
+    excluded = set(last)
+    candidates = [n for n in available if n not in excluded] or available[:]
+    random.shuffle(candidates)
+    picks = candidates[:count]
+    while len(picks) < count:  # pool smaller than count — allow repeat
+        picks.append(random.choice(available))
+    state[slot_key] = picks if count > 1 else picks[0]
+    return picks
 
 # ── Color schemes ──────────────────────────────────────
 # Each scheme: (name, css_vars dict)
@@ -496,1277 +536,192 @@ REGIONAL_COVERAGE_CHECKLISTS = [
 ]
 
 
-def _pick_random(pool, count=1):
-    """Pick random items from a pool without replacement."""
-    return random.sample(pool, min(count, len(pool)))
-
-
-def generate_website(info: dict) -> str:
-    """
-    Generate a trucking company website and return the path to the zip file.
-
-    info dict keys:
-        company_name: str
-        company_short: str (abbreviated name for logo)
-        domain: str
-        email: str
-        address: str (full street address)
-        city_state: str (e.g. "Round Lake, IL 60073")
-        phone: str (optional)
-        service_type: str (e.g. "OTR Trucking — Dry Van — 48 States")
-        job_title: str
-        pay_range: str (e.g. "$1,300 – $1,600 / week")
-        home_time: str (e.g. "Home every 2 weeks for 2 days")
-        home_time_short: str (e.g. "2 Weeks Out")
-        home_time_detail: str (e.g. "Home 2 Days")
-        routes: str (e.g. "48 States")
-        routes_type: str (e.g. "OTR Routes")
-        min_experience: str (e.g. "6 Mo. Exp")
-        fourth_card_label: str (e.g. "Min. Required")
-        fourth_card_value: str (e.g. "6 Mo. Exp")
-        perks: list[str]
-        hero_desc: str (optional — custom hero description)
-    """
-    # Pick random style
-    scheme = random.choice(COLOR_SCHEMES)
-    heading_font, body_font, fonts_url = random.choice(FONT_PAIRS)
-    tagline, badge = random.choice(HERO_TAGLINES)
-    steps = random.choice(HOW_WE_WORK_SETS)
-    about_title = random.choice(ABOUT_TITLES)
-    about_checklist = random.choice(ABOUT_CHECKLISTS)
-    _is_regional = "regional" in info.get("routes_type", "OTR Routes").lower()
-    coverage_title = random.choice(REGIONAL_COVERAGE_TITLES if _is_regional else COVERAGE_TITLES)
-    coverage_checklist = random.choice(REGIONAL_COVERAGE_CHECKLISTS if _is_regional else COVERAGE_CHECKLISTS)
-
-    company = info["company_name"]
-    short = info.get("company_short", company.split()[0])
-    domain = info["domain"]
-    email = info["email"]
-    address = info["address"]
-    city_state = info["city_state"]
-    _route_type = info.get("routes_type", "OTR Routes")
-    _svc_label = "Regional" if "regional" in _route_type.lower() else "OTR"
-    _svc_area = "Multi-State" if _is_regional else "48 States"
-    service = info.get("service_type", f"{_svc_label} Trucking — Dry Van — {_svc_area}")
-    job_title = info["job_title"]
-    pay_range = info["pay_range"]
-
-    # Pick random about/coverage descriptions and fill in company info
-    about_desc = random.choice(ABOUT_DESCRIPTIONS).format(company=company, city_state=city_state)
-    coverage_desc = random.choice(REGIONAL_COVERAGE_DESCRIPTIONS if _is_regional else COVERAGE_DESCRIPTIONS).format(company=company, city_state=city_state)
-
-    # Hero description
-    city_only = city_state.split(",")[0].strip() if "," in city_state else city_state
-    state_only = city_state.split(",")[1].strip().split()[0] if "," in city_state else ""
-    _hero_area = "a focused multi-state region" if _is_regional else "all 48 states"
-    hero_desc = info.get("hero_desc", f"{company} keeps goods moving across {_hero_area} with reliable service — out of {city_only}, {state_only}.")
-
-    # Build perks HTML
-    perks_html = ""
-    for p in info.get("perks", []):
-        perks_html += f'        <div class="perk">{p}</div>\n'
-
-    # Build logo parts
-    logo_parts = short.split(None, 1)
-    if len(logo_parts) == 2:
-        logo_html = f'{logo_parts[0]}<span> {logo_parts[1].upper()}</span>'
-    else:
-        logo_html = f'{short}<span> {domain.split(".")[0].upper()}</span>'
-
-    html = f'''<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{company} — {service} | {city_state}</title>
-  <meta name="description" content="{company} — {service} based in {city_state}. Now hiring experienced drivers.">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="{fonts_url}" rel="stylesheet">
-  <style>
-    *, *::before, *::after {{ margin: 0; padding: 0; box-sizing: border-box; }}
-    html {{ scroll-behavior: smooth; }}
-    body {{
-      font-family: '{body_font}', sans-serif;
-      color: #334155;
-      background: {scheme["body_bg"]};
-      overflow-x: hidden;
-      line-height: 1.65;
-    }}
-    h1, h2, h3, h4, h5 {{ font-family: '{heading_font}', sans-serif; }}
-    a {{ text-decoration: none; color: inherit; }}
-    img {{ max-width: 100%; display: block; }}
-    ul {{ list-style: none; }}
-
-    :root {{
-      --navy: {scheme["navy"]};
-      --dark-slate: {scheme["dark_slate"]};
-      --primary: {scheme["primary"]};
-      --primary-light: {scheme["primary_light"]};
-      --primary-hover: {scheme["primary_hover"]};
-      --accent-bg: {scheme["accent_bg"]};
-      --accent-bg-light: {scheme["accent_bg_light"]};
-      --gray-50: {scheme["gray_50"]};
-      --gray-100: #F1F5F9;
-      --gray-400: #94A3B8;
-      --gray-500: #64748B;
-      --gray-700: #334155;
-      --gray-900: #0F172A;
-      --white: #FFFFFF;
-    }}
-
-    .reveal {{
-      opacity: 0; transform: translateY(30px);
-      transition: opacity 0.6s ease-out, transform 0.6s ease-out;
-    }}
-    .reveal.show {{ opacity: 1; transform: translateY(0); }}
-    .reveal-left {{
-      opacity: 0; transform: translateX(-30px);
-      transition: opacity 0.6s ease-out, transform 0.6s ease-out;
-    }}
-    .reveal-left.show {{ opacity: 1; transform: translateX(0); }}
-    .reveal-right {{
-      opacity: 0; transform: translateX(30px);
-      transition: opacity 0.6s ease-out, transform 0.6s ease-out;
-    }}
-    .reveal-right.show {{ opacity: 1; transform: translateX(0); }}
-    .delay-1 {{ transition-delay: 0.1s; }}
-    .delay-2 {{ transition-delay: 0.2s; }}
-    .delay-3 {{ transition-delay: 0.3s; }}
-
-    header {{
-      position: fixed; top: 0; width: 100%; z-index: 1000;
-      background: rgba(255,255,255,0.95); backdrop-filter: blur(12px);
-      border-bottom: 1px solid transparent;
-      transition: border-color 0.3s, box-shadow 0.3s; height: 68px;
-    }}
-    header.scrolled {{ border-bottom-color: #E2E8F0; box-shadow: 0 1px 12px rgba(0,0,0,0.06); }}
-    .nav-inner {{
-      max-width: 1200px; margin: 0 auto; padding: 0 32px;
-      height: 100%; display: flex; align-items: center; justify-content: space-between;
-    }}
-    .logo {{
-      font-family: '{heading_font}', sans-serif; font-weight: 900;
-      font-size: 1.5rem; color: var(--navy); letter-spacing: -0.5px;
-    }}
-    .logo span {{ color: var(--primary); }}
-    .nav-menu {{ display: flex; gap: 32px; align-items: center; }}
-    .nav-menu a {{
-      font-size: 0.88rem; font-weight: 600; color: var(--gray-500);
-      letter-spacing: 0.3px; transition: color 0.3s;
-    }}
-    .nav-menu a:hover {{ color: var(--primary); }}
-    .nav-cta {{
-      background: var(--primary) !important; color: var(--white) !important;
-      padding: 9px 22px; border-radius: 6px;
-      font-size: 0.85rem !important; font-weight: 700 !important;
-      transition: background 0.3s !important;
-    }}
-    .nav-cta:hover {{ background: var(--primary-hover) !important; }}
-
-    .burger {{
-      display: none; cursor: pointer; flex-direction: column; gap: 5px; z-index: 1001;
-    }}
-    .burger div {{
-      width: 24px; height: 2px; background: var(--navy);
-      border-radius: 2px; transition: all 0.3s;
-    }}
-    .burger.open div:nth-child(1) {{ transform: rotate(45deg) translate(5px, 5px); }}
-    .burger.open div:nth-child(2) {{ opacity: 0; }}
-    .burger.open div:nth-child(3) {{ transform: rotate(-45deg) translate(5px, -5px); }}
-
-    .mobile-menu {{
-      display: none; position: fixed; inset: 0; background: var(--white);
-      z-index: 999; flex-direction: column; align-items: center;
-      justify-content: center; gap: 32px;
-    }}
-    .mobile-menu.open {{ display: flex; }}
-    .mobile-menu a {{
-      font-family: '{heading_font}', sans-serif; font-size: 1.4rem;
-      font-weight: 700; color: var(--navy); letter-spacing: 1px; transition: color 0.3s;
-    }}
-    .mobile-menu a:hover {{ color: var(--primary); }}
-
-    .hero {{
-      position: relative; min-height: 100vh; display: flex; align-items: center;
-      background: url('images/hero-bg.jpg') center/cover no-repeat;
-      padding: 120px 32px 80px;
-    }}
-    .hero::before {{
-      content: ''; position: absolute; inset: 0;
-      background: linear-gradient(135deg, rgba({_hex_to_rgb(scheme["navy"])},0.88) 0%, rgba({_hex_to_rgb(scheme["dark_slate"])},0.75) 100%);
-    }}
-    .hero-inner {{
-      position: relative; z-index: 1; max-width: 1200px; margin: 0 auto; width: 100%;
-    }}
-    .hero-badge {{
-      display: inline-flex; align-items: center; gap: 8px;
-      background: rgba({_hex_to_rgb(scheme["primary"])},0.15);
-      border: 1px solid rgba({_hex_to_rgb(scheme["primary"])},0.3);
-      color: var(--accent-bg); font-size: 0.78rem; font-weight: 600;
-      padding: 6px 16px; border-radius: 50px; margin-bottom: 24px;
-      letter-spacing: 1px; text-transform: uppercase;
-    }}
-    .hero-badge::before {{
-      content: ''; width: 8px; height: 8px; background: #22C55E;
-      border-radius: 50%; animation: pulse 2s infinite;
-    }}
-    @keyframes pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.4; }} }}
-    .hero h1 {{
-      font-size: clamp(2.8rem, 6vw, 4.5rem); font-weight: 900; color: var(--white);
-      line-height: 1.08; margin-bottom: 20px; max-width: 700px; letter-spacing: -1px;
-    }}
-    .hero h1 .accent {{ color: var(--primary-light); }}
-    .hero-sub {{
-      font-size: 1.15rem; color: var(--gray-400); max-width: 520px;
-      line-height: 1.7; margin-bottom: 36px;
-    }}
-    .hero-actions {{ display: flex; gap: 14px; flex-wrap: wrap; }}
-    .btn {{
-      display: inline-block; padding: 14px 32px; border-radius: 6px;
-      font-family: '{heading_font}', sans-serif; font-weight: 700;
-      font-size: 0.95rem; letter-spacing: 0.3px; cursor: pointer;
-      transition: all 0.3s; border: none; text-align: center;
-    }}
-    .btn-fill {{ background: var(--primary); color: var(--white); }}
-    .btn-fill:hover {{ background: var(--primary-hover); transform: translateY(-2px); box-shadow: 0 6px 20px rgba({_hex_to_rgb(scheme["primary"])},0.35); }}
-    .btn-ghost {{ background: transparent; color: var(--white); border: 1px solid rgba(255,255,255,0.2); }}
-    .btn-ghost:hover {{ border-color: var(--primary-light); color: var(--primary-light); }}
-
-    .hero-stats {{
-      display: flex; gap: 48px; margin-top: 60px; padding-top: 32px;
-      border-top: 1px solid rgba(255,255,255,0.08);
-    }}
-    .hero-stat-num {{
-      font-family: '{heading_font}', sans-serif; font-size: 2rem;
-      font-weight: 900; color: var(--white);
-    }}
-    .hero-stat-label {{
-      font-size: 0.82rem; color: var(--gray-400); margin-top: 2px;
-      text-transform: uppercase; letter-spacing: 1px;
-    }}
-
-    .section {{ padding: 100px 32px; }}
-    .container {{ max-width: 1200px; margin: 0 auto; }}
-    .section-header {{ text-align: center; max-width: 600px; margin: 0 auto 64px; }}
-    .section-label {{
-      font-family: '{heading_font}', sans-serif; font-size: 0.75rem;
-      font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
-      color: var(--primary); margin-bottom: 12px;
-    }}
-    .section-heading {{
-      font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 900;
-      color: var(--gray-900); margin-bottom: 14px; letter-spacing: -0.5px; line-height: 1.15;
-    }}
-    .section-desc {{ font-size: 1.05rem; color: var(--gray-500); line-height: 1.7; }}
-
-    .how-section {{ background: var(--gray-50); }}
-    .steps-row {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }}
-    .step-box {{
-      background: var(--white); border: 1px solid #E2E8F0; border-radius: 10px;
-      padding: 36px 28px; position: relative;
-      transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s;
-    }}
-    .step-box:hover {{
-      border-color: var(--primary); box-shadow: 0 8px 30px rgba({_hex_to_rgb(scheme["primary"])},0.08);
-      transform: translateY(-4px);
-    }}
-    .step-number {{
-      font-family: '{heading_font}', sans-serif; font-size: 3rem;
-      font-weight: 900; color: var(--accent-bg); line-height: 1; margin-bottom: 16px;
-    }}
-    .step-box:hover .step-number {{ color: var(--primary); transition: color 0.3s; }}
-    .step-box h3 {{ font-size: 1.2rem; font-weight: 700; color: var(--gray-900); margin-bottom: 10px; }}
-    .step-box p {{ font-size: 0.95rem; color: var(--gray-500); line-height: 1.6; }}
-
-    .about-section {{ background: var(--white); }}
-    .split-row {{
-      display: grid; grid-template-columns: 1fr 1fr; gap: 64px;
-      align-items: center; margin-bottom: 80px;
-    }}
-    .split-row:last-child {{ margin-bottom: 0; }}
-    .split-row.flip .split-img {{ order: 2; }}
-    .split-row.flip .split-text {{ order: 1; }}
-    .split-img img {{ border-radius: 10px; width: 100%; box-shadow: 0 4px 24px rgba(0,0,0,0.06); }}
-    .split-text .section-label {{ text-align: left; }}
-    .split-text h3 {{
-      font-size: 1.9rem; font-weight: 900; color: var(--gray-900);
-      margin-bottom: 16px; letter-spacing: -0.3px; line-height: 1.2;
-    }}
-    .split-text p {{ font-size: 1rem; color: var(--gray-500); margin-bottom: 24px; line-height: 1.7; }}
-    .check-list {{ display: flex; flex-direction: column; gap: 12px; }}
-    .check-list li {{
-      display: flex; align-items: center; gap: 12px;
-      font-size: 0.95rem; color: var(--gray-700); font-weight: 500;
-    }}
-    .check-dot {{
-      width: 22px; height: 22px; border-radius: 6px;
-      background: var(--accent-bg); color: var(--primary);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 0.7rem; font-weight: 900; flex-shrink: 0;
-    }}
-
-    .careers-section {{ background: var(--navy); }}
-    .careers-section .section-heading {{ color: var(--white); }}
-    .careers-section .section-desc {{ color: var(--gray-400); }}
-    .job-title-bar {{ text-align: center; margin-bottom: 48px; }}
-    .job-title-bar h3 {{ font-size: 1.4rem; color: var(--white); font-weight: 700; margin-bottom: 4px; }}
-    .job-title-bar .salary {{
-      font-size: 1.2rem; color: var(--primary-light); font-weight: 700;
-      font-family: '{heading_font}', sans-serif;
-    }}
-    .cards-row {{
-      display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
-      max-width: 960px; margin: 0 auto 48px;
-    }}
-    .info-card {{
-      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
-      border-radius: 8px; padding: 24px 18px; text-align: center;
-      transition: border-color 0.3s, transform 0.3s;
-    }}
-    .info-card:hover {{ border-color: var(--primary); transform: translateY(-3px); }}
-    .info-card .ic-val {{
-      font-family: '{heading_font}', sans-serif; font-size: 1.25rem;
-      font-weight: 900; color: var(--primary-light); margin-bottom: 4px;
-    }}
-    .info-card .ic-lbl {{ font-size: 0.82rem; color: var(--gray-400); }}
-
-    .perks-columns {{
-      display: grid; grid-template-columns: 1fr 1fr; gap: 12px 40px;
-      max-width: 660px; margin: 0 auto 40px;
-    }}
-    .perk {{
-      display: flex; align-items: center; gap: 10px;
-      font-size: 0.93rem; color: rgba(255,255,255,0.75);
-    }}
-    .perk::before {{
-      content: ''; width: 6px; height: 6px; border-radius: 50%;
-      background: var(--primary-light); flex-shrink: 0;
-    }}
-    .eeo-text {{
-      text-align: center; font-size: 0.78rem; color: rgba(255,255,255,0.25);
-      max-width: 680px; margin: 0 auto; line-height: 1.6;
-      padding-top: 28px; border-top: 1px solid rgba(255,255,255,0.06);
-    }}
-
-    .contact-section {{ background: var(--gray-50); }}
-    .contact-layout {{
-      display: grid; grid-template-columns: 1fr 1.1fr; gap: 48px;
-      max-width: 1000px; margin: 0 auto;
-    }}
-    .contact-details h3 {{ font-size: 1.4rem; color: var(--gray-900); margin-bottom: 28px; }}
-    .c-item {{ display: flex; gap: 14px; margin-bottom: 22px; align-items: flex-start; }}
-    .c-icon {{
-      width: 40px; height: 40px; border-radius: 8px;
-      background: var(--accent-bg); color: var(--primary);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1rem; font-weight: 700; flex-shrink: 0;
-    }}
-    .c-item h4 {{
-      font-family: '{heading_font}', sans-serif; font-size: 0.9rem;
-      font-weight: 700; color: var(--gray-900); margin-bottom: 2px;
-    }}
-    .c-item p {{ font-size: 0.9rem; color: var(--gray-500); }}
-    .quote-form {{
-      background: var(--white); padding: 32px; border-radius: 10px; border: 1px solid #E2E8F0;
-    }}
-    .quote-form h3 {{ font-size: 1.2rem; color: var(--gray-900); margin-bottom: 24px; }}
-    .field {{ margin-bottom: 14px; }}
-    .field label {{
-      display: block; font-size: 0.82rem; font-weight: 700;
-      color: var(--gray-700); margin-bottom: 5px; letter-spacing: 0.3px;
-    }}
-    .field input, .field textarea, .field select {{
-      width: 100%; padding: 11px 14px; border: 1px solid #E2E8F0;
-      border-radius: 6px; font-family: '{body_font}', sans-serif;
-      font-size: 0.95rem; color: var(--gray-700); background: var(--gray-50);
-      outline: none; transition: border-color 0.3s;
-    }}
-    .field input:focus, .field textarea:focus, .field select:focus {{ border-color: var(--primary); }}
-    .field textarea {{ resize: vertical; min-height: 90px; }}
-    .field-row {{ display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }}
-    .quote-form .btn-fill {{ width: 100%; padding: 13px; font-size: 0.95rem; }}
-
-    footer {{
-      background: var(--navy); padding: 44px 32px 24px; color: var(--gray-400);
-    }}
-    .footer-row {{
-      max-width: 1200px; margin: 0 auto; display: flex;
-      justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;
-    }}
-    .f-logo {{
-      font-family: '{heading_font}', sans-serif; font-weight: 900;
-      font-size: 1.2rem; color: var(--white);
-    }}
-    .f-logo span {{ color: var(--primary); }}
-    .f-links {{ display: flex; gap: 24px; }}
-    .f-links a {{ font-size: 0.85rem; color: var(--gray-400); transition: color 0.3s; }}
-    .f-links a:hover {{ color: var(--primary-light); }}
-    .f-bottom {{
-      text-align: center; font-size: 0.78rem; color: rgba(255,255,255,0.2);
-      margin-top: 32px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.06);
-      max-width: 1200px; margin-left: auto; margin-right: auto;
-    }}
-
-    @media (max-width: 900px) {{
-      .nav-menu {{ display: none; }}
-      .burger {{ display: flex; }}
-      .steps-row {{ grid-template-columns: 1fr; max-width: 420px; margin: 0 auto; }}
-      .split-row {{ grid-template-columns: 1fr; gap: 32px; }}
-      .split-row.flip .split-img {{ order: 0; }}
-      .split-row.flip .split-text {{ order: 0; }}
-      .cards-row {{ grid-template-columns: 1fr 1fr; }}
-      .contact-layout {{ grid-template-columns: 1fr; }}
-      .hero-stats {{ gap: 28px; flex-wrap: wrap; }}
-      .section {{ padding: 72px 20px; }}
-    }}
-    @media (max-width: 550px) {{
-      .cards-row {{ grid-template-columns: 1fr; max-width: 300px; margin-left: auto; margin-right: auto; }}
-      .perks-columns {{ grid-template-columns: 1fr; }}
-      .field-row {{ grid-template-columns: 1fr; }}
-      .hero h1 {{ font-size: 2.2rem; }}
-      .hero-stats {{ flex-direction: column; gap: 16px; }}
-      .footer-row {{ flex-direction: column; text-align: center; }}
-      .f-links {{ flex-wrap: wrap; justify-content: center; }}
-    }}
-  </style>
-</head>
-<body>
-
-  <header id="header">
-    <div class="nav-inner">
-      <a href="#" class="logo">{logo_html}</a>
-      <nav class="nav-menu">
-        <a href="#process">Process</a>
-        <a href="#about">About</a>
-        <a href="#careers">Careers</a>
-        <a href="#contact" class="nav-cta">Get a Quote</a>
-      </nav>
-      <div class="burger" id="burger" role="button" tabindex="0" aria-label="Menu">
-        <div></div><div></div><div></div>
-      </div>
-    </div>
-  </header>
-
-  <div class="mobile-menu" id="mobMenu">
-    <a href="#process" onclick="toggleMenu()">Process</a>
-    <a href="#about" onclick="toggleMenu()">About</a>
-    <a href="#careers" onclick="toggleMenu()">Careers</a>
-    <a href="#contact" onclick="toggleMenu()">Contact</a>
-  </div>
-
-  <section class="hero">
-    <div class="hero-inner">
-      <div class="hero-badge reveal">{badge}</div>
-      <h1 class="reveal">{tagline}</h1>
-      <p class="hero-sub reveal">{hero_desc}</p>
-      <div class="hero-actions reveal">
-        <a href="#contact" class="btn btn-fill">Request a Quote</a>
-        <a href="#careers" class="btn btn-ghost">View Open Positions</a>
-      </div>
-      <div class="hero-stats reveal">
-        <div>
-          <div class="hero-stat-num">48</div>
-          <div class="hero-stat-label">States Covered</div>
-        </div>
-        <div>
-          <div class="hero-stat-num">24/7</div>
-          <div class="hero-stat-label">Dispatch Support</div>
-        </div>
-        <div>
-          <div class="hero-stat-num">{_svc_label}</div>
-          <div class="hero-stat-label">{info.get("service_short", "Dry Van Service")}</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="section how-section" id="process">
-    <div class="container">
-      <div class="section-header reveal">
-        <div class="section-label">Our Process</div>
-        <h2 class="section-heading">How We Work</h2>
-        <p class="section-desc">From first call to final delivery — straightforward logistics built on communication and accountability.</p>
-      </div>
-      <div class="steps-row">
-        <div class="step-box reveal delay-1">
-          <div class="step-number">01</div>
-          <h3>{steps[0][0]}</h3>
-          <p>{steps[0][1]}</p>
-        </div>
-        <div class="step-box reveal delay-2">
-          <div class="step-number">02</div>
-          <h3>{steps[1][0]}</h3>
-          <p>{steps[1][1]}</p>
-        </div>
-        <div class="step-box reveal delay-3">
-          <div class="step-number">03</div>
-          <h3>{steps[2][0]}</h3>
-          <p>{steps[2][1]}</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="section about-section" id="about">
-    <div class="container">
-      <div class="split-row">
-        <div class="split-img reveal-left">
-          <img src="images/about-fleet.jpg" alt="{company} fleet">
-        </div>
-        <div class="split-text reveal-right">
-          <div class="section-label">About Us</div>
-          <h3>{about_title}</h3>
-          <p>{about_desc}</p>
-          <ul class="check-list">
-            <li><span class="check-dot">&#10003;</span> {about_checklist[0]}</li>
-            <li><span class="check-dot">&#10003;</span> {about_checklist[1]}</li>
-            <li><span class="check-dot">&#10003;</span> {about_checklist[2]}</li>
-            <li><span class="check-dot">&#10003;</span> {about_checklist[3]}</li>
-          </ul>
-        </div>
-      </div>
-      <div class="split-row flip">
-        <div class="split-img reveal-right">
-          <img src="images/coverage-routes.jpg" alt="Route coverage">
-        </div>
-        <div class="split-text reveal-left">
-          <div class="section-label">Coverage</div>
-          <h3>{coverage_title}</h3>
-          <p>{coverage_desc}</p>
-          <ul class="check-list">
-            <li><span class="check-dot">&#10003;</span> {coverage_checklist[0]}</li>
-            <li><span class="check-dot">&#10003;</span> {coverage_checklist[1]}</li>
-            <li><span class="check-dot">&#10003;</span> {coverage_checklist[2]}</li>
-            <li><span class="check-dot">&#10003;</span> {coverage_checklist[3]}</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="section careers-section" id="careers">
-    <div class="container">
-      <div class="section-header reveal">
-        <div class="section-label">Careers</div>
-        <h2 class="section-heading">Drive With {short}</h2>
-        <p class="section-desc">We're hiring experienced drivers who want solid pay, real home time, and a team that has their back.</p>
-      </div>
-      <div class="job-title-bar reveal">
-        <h3>{job_title}</h3>
-        <div class="salary">{pay_range}</div>
-      </div>
-      <div class="cards-row reveal">
-        <div class="info-card">
-          <div class="ic-val">{info.get("pay_short", pay_range.split("/")[0].strip())}</div>
-          <div class="ic-lbl">Weekly Pay</div>
-        </div>
-        <div class="info-card">
-          <div class="ic-val">{info.get("home_time_short", "2 Weeks Out")}</div>
-          <div class="ic-lbl">{info.get("home_time_detail", "Home 2 Days")}</div>
-        </div>
-        <div class="info-card">
-          <div class="ic-val">{info.get("routes", "48 States")}</div>
-          <div class="ic-lbl">{info.get("routes_type", "OTR Routes")}</div>
-        </div>
-        <div class="info-card">
-          <div class="ic-val">{info.get("fourth_card_value", "6 Mo. Exp")}</div>
-          <div class="ic-lbl">{info.get("fourth_card_label", "Min. Required")}</div>
-        </div>
-      </div>
-      <div class="perks-columns reveal">
-{perks_html}      </div>
-      <p class="eeo-text reveal">{company} is an Equal Opportunity Employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, national origin, age, disability, veteran status, sexual orientation, gender identity, or any other protected status.</p>
-    </div>
-  </section>
-
-  <section class="section contact-section" id="contact">
-    <div class="container">
-      <div class="section-header reveal">
-        <div class="section-label">Contact</div>
-        <h2 class="section-heading">Let's Talk Freight</h2>
-        <p class="section-desc">Need a quote or want to apply? Reach out — we respond fast.</p>
-      </div>
-      <div class="contact-layout">
-        <div class="contact-details reveal-left">
-          <h3>Get In Touch</h3>
-          <div class="c-item">
-            <div class="c-icon">&#9993;</div>
-            <div>
-              <h4>Email</h4>
-              <p>{email}</p>
-            </div>
-          </div>
-          <div class="c-item">
-            <div class="c-icon">&#9872;</div>
-            <div>
-              <h4>Address</h4>
-              <p>{address + '<br>' if address else ''}{city_state}</p>
-            </div>
-          </div>
-          <div class="c-item">
-            <div class="c-icon">&#9742;</div>
-            <div>
-              <h4>Hours</h4>
-              <p>Dispatch available 24/7</p>
-            </div>
-          </div>
-        </div>
-        <div class="quote-form reveal-right">
-          <h3>Request a Quote</h3>
-          <form id="contactForm">
-            <div class="field-row">
-              <div class="field">
-                <label>Full Name</label>
-                <input type="text" placeholder="Your name" required>
-              </div>
-              <div class="field">
-                <label>Company</label>
-                <input type="text" placeholder="Company name">
-              </div>
-            </div>
-            <div class="field-row">
-              <div class="field">
-                <label>Email</label>
-                <input type="email" placeholder="you@email.com" required>
-              </div>
-              <div class="field">
-                <label>Phone</label>
-                <input type="tel" placeholder="(555) 000-0000">
-              </div>
-            </div>
-            <div class="field">
-              <label>Inquiry Type</label>
-              <select>
-                <option value="">Select one</option>
-                <option value="quote">Freight Quote</option>
-                <option value="apply">Driver Application</option>
-                <option value="general">General Inquiry</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Message</label>
-              <textarea placeholder="Tell us what you need..."></textarea>
-            </div>
-            <button type="submit" class="btn btn-fill">Send Message</button>
-          </form>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <footer>
-    <div class="footer-row">
-      <div class="f-logo">{logo_html}</div>
-      <div class="f-links">
-        <a href="#process">Process</a>
-        <a href="#about">About</a>
-        <a href="#careers">Careers</a>
-        <a href="#contact">Contact</a>
-      </div>
-    </div>
-    <div class="f-bottom">&copy; 2026 {company}. All rights reserved. | {city_state}</div>
-  </footer>
-
-  <script>
-    const burger = document.getElementById('burger');
-    const mobMenu = document.getElementById('mobMenu');
-    function toggleMenu() {{
-      burger.classList.toggle('open');
-      mobMenu.classList.toggle('open');
-      document.body.style.overflow = mobMenu.classList.contains('open') ? 'hidden' : '';
-    }}
-    burger.addEventListener('click', toggleMenu);
-    window.addEventListener('scroll', () => {{
-      document.getElementById('header').classList.toggle('scrolled', window.scrollY > 40);
-    }});
-    const io = new IntersectionObserver((entries) => {{
-      entries.forEach(e => {{ if (e.isIntersecting) e.target.classList.add('show'); }});
-    }}, {{ threshold: 0.12 }});
-    document.querySelectorAll('.reveal, .reveal-left, .reveal-right').forEach(el => io.observe(el));
-    document.getElementById('contactForm').addEventListener('submit', e => {{
-      e.preventDefault();
-      alert('Thanks! We\\'ll get back to you shortly.');
-      e.target.reset();
-    }});
-  </script>
-
-</body>
-</html>'''
-
-    # Create temp dir, write files, zip
-    tmp_dir = tempfile.mkdtemp()
-    site_dir = os.path.join(tmp_dir, domain.replace(".", "_"))
-    os.makedirs(os.path.join(site_dir, "images"), exist_ok=True)
-
-    # Write HTML
-    with open(os.path.join(site_dir, "index.html"), "w", encoding="utf-8") as f:
-        f.write(html)
-
-    # Copy random stock images
-    images_dir = os.path.join(site_dir, "images")
-    if _HERO_IMAGES:
-        shutil.copy2(str(random.choice(_HERO_IMAGES)), os.path.join(images_dir, "hero-bg.jpg"))
-    if _ABOUT_IMAGES:
-        shutil.copy2(str(random.choice(_ABOUT_IMAGES)), os.path.join(images_dir, "about-fleet.jpg"))
-    if _COVERAGE_IMAGES:
-        shutil.copy2(str(random.choice(_COVERAGE_IMAGES)), os.path.join(images_dir, "coverage-routes.jpg"))
-
-    # Zip it
-    zip_name = f"{domain.replace('.', '_')}_website.zip"
-    zip_path = os.path.join(tmp_dir, zip_name)
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, dirs, files in os.walk(site_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, site_dir)
-                zf.write(file_path, arcname)
-
-    return zip_path
-
-
-# ── Template-based website generation ─────────────────
-_TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
-
-# Original company info baked into each template — used for find-and-replace
-_TEMPLATE_ORIGINALS = {
-    "collaborationlogisticsllc": {
-        "company": "Collaboration Logistics LLC",
-        "company_upper": "COLLABORATION LOGISTICS LLC",
-        "company_short": "Collaboration Logistics",
-        "domain": "collaborationlogisticsllc.com",
-        "email": "antwann@collaborationlogisticsllc.com",
-        "email_prefix": "antwann",
-        "address": "3450 Forrest Park Rd SE Apt 2202",
-        "city": "Atlanta, GA",
-    },
-    "g17corp": {
-        "company": "G17 Corp",
-        "company_upper": "G17 CORP",
-        "company_short": "G17 Corp",
-        "domain": "g17corp.com",
-        "email": "russell@g17corp.com",
-        "email_prefix": "russell",
-        "address": "3052 Sagebrook Dr",
-        "city": "Miamisburg, OH",
-    },
-    "matthewlogisticsllc": {
-        "company": "Matthew Logistics LLC",
-        "company_upper": "MATTHEW LOGISTICS LLC",
-        "company_short": "Matthew Logistics",
-        "domain": "matthewlogisticsllc.com",
-        "email": "yuliet@matthewlogisticsllc.com",
-        "email_prefix": "yuliet",
-        "address": "14214 Duncannon Dr",
-        "city": "Houston, TX",
-    },
-    "woodennickelfreightlogisticsllc": {
-        "company": "Wooden Nickel Freight & Logistics LLC",
-        "company_upper": "WOODEN NICKEL FREIGHT & LOGISTICS LLC",
-        "company_short": "Wooden Nickel Freight",
-        "domain": "woodennickelfreightlogisticsllc.com",
-        "email": "jordan@woodennickelfreightlogisticsllc.com",
-        "email_prefix": "jordan",
-        "address": "918 Akers Ridge Dr SE Ste 112",
-        "city": "Atlanta, GA",
-    },
-    "1guy1girl1truckllc": {
-        "company": "1 Guy 1 Girl 1 Truck LLC",
-        "company_upper": "1 GUY 1 GIRL 1 TRUCK LLC",
-        "company_short": "1 Guy 1 Girl 1 Truck",
-        "domain": "1guy1girl1truckllc.com",
-        "email": "precious@1guy1girl1truckllc.com",
-        "email_prefix": "precious",
-        "address": "1234 N Kenilworth Ave",
-        "city": "Oak Park, IL",
-    },
-    "oevtransportationllc": {
-        "company": "OEV Transportation LLC",
-        "company_upper": "OEV TRANSPORTATION LLC",
-        "company_short": "OEV Transportation",
-        "domain": "oevtransportationllc.com",
-        "email": "beard@oevtransportationllc.com",
-        "email_prefix": "beard",
-        "address": "13 Forest Wood Ln",
-        "city": "Park Forest, IL",
-    },
-    "paramountinvestments1llc": {
-        "company": "Paramount Investments 1 LLC",
-        "company_upper": "PARAMOUNT INVESTMENTS 1 LLC",
-        "company_short": "Paramount Investments 1",
-        "domain": "paramountinvestments1llc.com",
-        "email": "liam@paramountinvestments1llc.com",
-        "email_prefix": "liam",
-        "address": "",
-        "city": "Houston, TX",
-    },
-    "phenomenalstarlogisticsllc": {
-        "company": "Phenomenal Star Logistics LLC",
-        "company_upper": "PHENOMENAL STAR LOGISTICS LLC",
-        "company_short": "Phenomenal Star Logistics",
-        "domain": "phenomenalstarlogisticsllc.com",
-        "email": "james@phenomenalstarlogisticsllc.com",
-        "email_prefix": "james",
-        "address": "",
-        "city": "Atlanta, GA",
-    },
-    "squarebidnessllc": {
-        "company": "Square Bid-ness LLC",
-        "company_upper": "SQUARE BID-NESS LLC",
-        "company_short": "SQUARE BID-NESS",
-        "domain": "squarebid-nessllc.com",
-        "email": "austin@squarebid-nessllc.com",
-        "email_prefix": "austin",
-        "address": "7137 Rittenhouse Village Ct",
-        "city": "Houston, TX",
-    },
-}
-
-
-def generate_website_from_template(info: dict) -> str:
-    """
-    Pick a random template, replace company info, and return path to new zip.
-    Uses the same info dict as generate_website().
-    """
-    # Get available templates
-    available = [d for d in _TEMPLATE_ORIGINALS if (_TEMPLATES_DIR / d / "index.html").exists()]
-    if not available:
-        # Fallback to the original generator if no templates found
-        return generate_website(info)
-
-    template_name = random.choice(available)
-    original = _TEMPLATE_ORIGINALS[template_name]
-    template_dir = _TEMPLATES_DIR / template_name
-
-    # Read the template HTML
-    with open(template_dir / "index.html", "r", encoding="utf-8") as f:
-        html = f.read()
-
-    # New company info from user input
-    new_company = info["company_name"]
-    new_domain = info["domain"]
-    new_email = info["email"]
-    new_email_prefix = new_email.split("@")[0] if "@" in new_email else new_email
-    new_address = info.get("address", "")
-    new_city = info.get("city_state", "")
-    new_short = info.get("company_short", new_company)
-
-    # ── Replace company-specific strings (order matters — longest first) ──
-
-    # Email (full email first, then prefix alone in email contexts)
-    if original["email"]:
-        html = html.replace(original["email"], new_email)
-    # Domain references
-    if original["domain"]:
-        html = html.replace(original["domain"], new_domain)
-
-    # Company name — replace all case variants (longest first to avoid partial matches)
-    if original["company_upper"]:
-        html = html.replace(original["company_upper"], new_company.upper())
-        html = html.replace(original["company_upper"].replace("&", "&amp;"), new_company.upper().replace("&", "&amp;"))
-    if original["company"]:
-        html = html.replace(original["company"], new_company)
-        html = html.replace(original["company"].title(), new_company)
-        html = html.replace(original["company"].replace("&", "&amp;"), new_company.replace("&", "&amp;"))
-    # Short/logo name (e.g. "Collaboration Logistics" without "LLC")
-    orig_short = original.get("company_short", "")
-    if orig_short and orig_short != original["company"]:
-        html = html.replace(orig_short, new_short)
-    # Also replace the shortest recognizable company name fragment
-    # e.g. "Wooden Nickel" from "Wooden Nickel Freight"
-    orig_words = original["company"].replace("&", "").split()
-    # Try progressively shorter prefixes (min 2 words) to catch alt text etc.
-    for length in range(len(orig_words) - 1, 1, -1):
-        fragment = " ".join(orig_words[:length]).strip()
-        if len(fragment) >= 6 and fragment in html:
-            html = html.replace(fragment, new_short)
-            break
-
-    # Address
-    if original["address"] and new_address:
-        html = html.replace(original["address"], new_address)
-
-    # City
-    if original["city"] and new_city:
-        html = html.replace(original["city"], new_city)
-
-    # Copyright year
-    html = html.replace("&copy; 2025", "&copy; 2026")
-    html = html.replace("© 2025", "© 2026")
-
-    # ── Replace template image references with stock image names ──
-    # Templates use: truck1.jpg, truck2.jpg, pic1.png, pic2.png, Truck4.jpg, truck3.jpg
-    # Stock images: hero_*.jpg, about_*.jpg, coverage_*.jpg
-    hero_img = random.choice(_HERO_IMAGES).name if _HERO_IMAGES else "hero_1.jpg"
-    about_img = random.choice(_ABOUT_IMAGES).name if _ABOUT_IMAGES else "about_11.jpg"
-    coverage_img = random.choice(_COVERAGE_IMAGES).name if _COVERAGE_IMAGES else "coverage_21.jpg"
-    # Pick a second unique about and coverage image
-    about_img2 = random.choice([i.name for i in _ABOUT_IMAGES if i.name != about_img]) if len(_ABOUT_IMAGES) > 1 else about_img
-    hero_img2 = random.choice([i.name for i in _HERO_IMAGES if i.name != hero_img]) if len(_HERO_IMAGES) > 1 else hero_img
-
-    # Map template image names to stock images
-    html = html.replace("images/truck1.jpg", f"images/{hero_img}")
-    html = html.replace("images/truck2.jpg", f"images/{about_img}")
-    html = html.replace("images/truck3.jpg", f"images/{coverage_img}")
-    html = html.replace("images/Truck4.jpg", f"images/{about_img2}")
-    html = html.replace("images/pic1.png", f"images/{hero_img2}")
-    html = html.replace("images/pic2.png", f"images/{coverage_img}")
-
-    # ── Package into zip ──
-    tmp_dir = tempfile.mkdtemp()
-
-    # Write modified HTML
-    with open(os.path.join(tmp_dir, "index.html"), "w", encoding="utf-8") as f:
-        f.write(html)
-
-    # Copy stock images (not template images)
-    dest_images = os.path.join(tmp_dir, "images")
-    os.makedirs(dest_images, exist_ok=True)
-    used_images = {hero_img, about_img, coverage_img, about_img2, hero_img2}
-    for img_name in used_images:
-        src = _ASSETS_DIR / img_name
-        if src.exists():
-            shutil.copy2(str(src), os.path.join(dest_images, img_name))
-
-    # Create zip
-    zip_name = f"{new_domain.replace('.', '_')}_website.zip"
-    zip_path = os.path.join(tempfile.mkdtemp(), zip_name)
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, dirs, files in os.walk(tmp_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, tmp_dir)
-                zf.write(file_path, arcname)
-
-    # Cleanup temp dir
-    shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    return zip_path
 
 
 def generate_job_description(info: dict) -> str:
-    """Generate a unique Indeed job description as HTML fragments for rich-text pasting."""
+    """Generate an Indeed-compliant CDL-A job description as HTML fragments."""
     company = info["company_name"]
     city_state = info["city_state"]
-    job_title = info["job_title"]
     pay_range = info["pay_range"]
-    home_time = info.get("home_time", "Home every 2 weeks for 2 days")
+    home_time = info.get("home_time", "Home every 2 weeks for 3 days")
     perks = info.get("perks", [])
     min_exp = info.get("min_experience", "6 months")
     routes_type = info.get("routes_type", "OTR Routes")
     is_regional = "regional" in routes_type.lower()
     route_label = "Regional" if is_regional else "OTR"
-    route_area = "regional lanes" if is_regional else "all 48 states"
-    route_desc = "regional freight" if is_regional else "OTR freight"
+    coverage_noun = "a multi-state regional area" if is_regional else "the lower 48"
+    coverage_adj = "multi-state regional" if is_regional else "48-state"
 
-    # ── Tone ─────────────────────────────────────────────────────────────────
+    # ── Tone selection (voice variation across postings) ──
     tone = random.choice(["direct", "professional", "conversational"])
 
-    # ── 30 section title styles ───────────────────────────────────────────────
-    section_styles = [
-        {"duties": "Day-to-Day", "reqs": "What You Bring", "pay": "Your Pay & Benefits", "schedule": "Home Time & Routes"},
-        {"duties": "The Work", "reqs": "What We Need", "pay": "Compensation", "schedule": "Schedule & Routes"},
-        {"duties": "Behind the Wheel", "reqs": "What We Need From You", "pay": "What You're Getting", "schedule": "The Schedule"},
-        {"duties": "On the Road", "reqs": "Requirements", "pay": "Pay & Perks", "schedule": "Where You'll Run"},
-        {"duties": "Your Daily Run", "reqs": "Qualifications", "pay": "What We Offer", "schedule": "Routes & Home Time"},
-        {"duties": "What the Job Looks Like", "reqs": "Who We're Looking For", "pay": "The Package", "schedule": "Routing & Time Off"},
-        {"duties": "What You'll Be Doing", "reqs": "What We Expect", "pay": "Pay & Benefits", "schedule": "Your Schedule"},
-        {"duties": "Life on the Road", "reqs": "Must-Haves", "pay": "Earnings & Perks", "schedule": "Home Time"},
-        {"duties": "The Gig", "reqs": "Before You Apply", "pay": "What's In It for You", "schedule": "Where You'll Be"},
-        {"duties": "Your Responsibilities", "reqs": "What It Takes", "pay": "Total Compensation", "schedule": "Route Details"},
-        {"duties": "Every Day Looks Like This", "reqs": "You'll Need", "pay": "Here's What You Get", "schedule": "Running & Resting"},
-        {"duties": "What We'll Ask of You", "reqs": "The Non-Negotiables", "pay": "Your Earnings", "schedule": "Schedule & Home Time"},
-        {"duties": "Duties", "reqs": "Driver Requirements", "pay": "Benefits Package", "schedule": "Lanes & Schedule"},
-        {"duties": "The Day-to-Day Reality", "reqs": "Who Should Apply", "pay": "Compensation & Benefits", "schedule": "Route & Rest Info"},
-        {"duties": "A Typical Week", "reqs": "Minimum Qualifications", "pay": "What You'll Earn", "schedule": "How the Schedule Works"},
-        {"duties": "What's Expected", "reqs": "To Be Considered", "pay": "Pay Structure", "schedule": "Routing & Days Off"},
-        {"duties": "In the Driver's Seat", "reqs": "Required Credentials", "pay": "Your Compensation", "schedule": "On the Road & Off"},
-        {"duties": "From Pickup to Drop", "reqs": "Who Fits This Role", "pay": "The Numbers", "schedule": "Time on the Road"},
-        {"duties": "How Your Day Goes", "reqs": "What We're Looking For", "pay": "Pay, Perks & More", "schedule": "How Routing Works"},
-        {"duties": "Daily Operations", "reqs": "Eligibility", "pay": "What You Take Home", "schedule": "Schedule Details"},
-        {"duties": "What This Job Involves", "reqs": "Hiring Criteria", "pay": "Compensation Details", "schedule": "Where and When"},
-        {"duties": "Your Role", "reqs": "Candidate Profile", "pay": "Financial Package", "schedule": "Home Time & Routing"},
-        {"duties": "Expectations", "reqs": "Baseline Requirements", "pay": "What We Pay", "schedule": "How It Works"},
-        {"duties": "What Driving With Us Looks Like", "reqs": "The Basics We Need", "pay": "Pay & Benefits Breakdown", "schedule": "Your Time"},
-        {"duties": "Here's the Job", "reqs": "Here's What We Need", "pay": "Here's What You Get", "schedule": "Here's the Schedule"},
-        {"duties": "Core Duties", "reqs": "Qualifications & Requirements", "pay": "Earnings Overview", "schedule": "Routing Schedule"},
-        {"duties": "What You'll Handle", "reqs": "Who Qualifies", "pay": "Money & Benefits", "schedule": "Time Breakdown"},
-        {"duties": "Job Functions", "reqs": "Prerequisites", "pay": "Reward Package", "schedule": "Run & Rest Pattern"},
-        {"duties": "Responsibilities on the Road", "reqs": "Driver Checklist", "pay": "What We Bring to the Table", "schedule": "How Your Time Splits"},
-        {"duties": "Typical Workload", "reqs": "What You Need to Have", "pay": "Full Benefits Rundown", "schedule": "Route & Home Pattern"},
-    ]
-
-    # ── 30 intro paragraphs ───────────────────────────────────────────────────
-    intros = [
-        f"{company} is looking for a dependable driver out of {city_state}. We run {route_desc} across {route_area} with consistent miles and a dispatch team that keeps things moving. If you want steady work, fair pay, and a carrier that respects your time — keep reading.",
-        f"We need another solid driver at {company}. Based out of {city_state}, we haul dry van freight with no games and no gimmicks. Good pay, real home time, and a team that has your back.",
-        f"{company} is hiring out of {city_state}. We're a straightforward carrier that moves freight, pays well, and treats drivers like adults. If that sounds like what you've been looking for, here's the details.",
-        f"Looking for a driving job that doesn't come with a list of broken promises? {company} runs {route_desc} from {city_state} across {route_area}. We keep it real — here's what the job looks like.",
-        f"{company} needs experienced drivers. We're based in {city_state} and we run {route_desc} with consistent freight, fair pay, and a dispatch team that actually listens. Here's the rundown.",
-        f"We're hiring at {company}. If you're a CDL-A driver looking for consistent miles and a carrier that doesn't waste your time, read on. We operate out of {city_state} and cover {route_area}.",
-        f"Tired of carriers that overpromise and underdeliver? {company} out of {city_state} keeps it simple: good freight, honest pay, and a team that respects the people behind the wheel.",
-        f"{company} is a {city_state}-based carrier looking to add experienced drivers to our fleet. We run {route_desc} across {route_area}, pay consistently, and don't play games with home time.",
-        f"Here's a driving job that won't waste your time. {company} runs {route_desc} out of {city_state}. Consistent miles, weekly pay, and a dispatch team that treats you like a human being.",
-        f"If you know how to drive and want a company that knows how to treat drivers, {company} might be your next stop. We're hiring out of {city_state} for {route_label} routes across {route_area}.",
-        f"{company} operates from {city_state} and we're looking for drivers who want stability. We run freight with consistent lanes and a team that communicates.",
-        f"Want miles that actually pay and a company that actually cares? {company} is hiring {route_label} drivers out of {city_state}. No bait-and-switch — just honest work.",
-        f"At {company}, drivers aren't a number. We're a growing carrier out of {city_state} looking for experienced {route_label} professionals who want consistent work and real support.",
-        f"{company} hauls freight the right way — out of {city_state}, across {route_area}. We're hiring drivers who take the job seriously and want a carrier that does the same.",
-        f"We're expanding our fleet at {company} and need reliable CDL-A drivers. Based in {city_state}, we run steady {route_label} routes with good pay and real home time. Here's the full picture.",
-        f"{company} is a no-nonsense carrier operating out of {city_state}. We need experienced drivers who want steady miles, fair compensation, and a company that keeps its word.",
-        f"Looking for your next driving gig? {company} runs {route_desc} from {city_state}. We've got the freight, the trucks, and the pay — we just need the driver.",
-        f"At {company} in {city_state}, we believe good drivers deserve a good company. We're hiring {route_label} professionals for consistent routes, weekly pay, and a team that backs you up.",
-        f"{company} is adding drivers to our team. We run {route_desc} from our base in {city_state}. If you want consistent freight and a company that doesn't play games, this is it.",
-        f"We're a {city_state} carrier that's growing the right way. {company} needs experienced drivers who want reliable work, competitive pay, and a dispatch team that respects their time.",
-        f"No fluff, no empty promises. {company} is hiring CDL-A drivers out of {city_state} for {route_label} routes. Here's exactly what the job looks like and what you'll earn.",
-        f"{company} runs clean, consistent freight out of {city_state}. We need another dependable driver who wants stable work and fair treatment. The details are below.",
-        f"Drivers at {company} get treated right. We're a growing operation in {city_state} looking for experienced {route_label} professionals. If you want honest work with honest pay, read on.",
-        f"Simple pitch: {company} needs drivers. We run {route_desc} out of {city_state}, pay weekly, and don't make you beg for home time. Interested? Keep reading.",
-        f"{company} out of {city_state} is looking for CDL-A drivers who want to work for a carrier that values their time, their safety, and their paycheck. Here's what we're offering.",
-        f"We're not the biggest carrier, but we're one of the best to work for. {company} is hiring out of {city_state} and we treat our drivers like the professionals they are.",
-        f"Steady freight. Good pay. Real home time. That's {company} in three phrases. We're hiring CDL-A drivers from our {city_state} base for {route_label} routes.",
-        f"If you've been through carriers that don't deliver on their promises, give {company} a shot. We operate out of {city_state} and we mean what we say — about pay, about home time, about everything.",
-        f"{company} is a carrier worth driving for. Headquartered in {city_state}, we provide consistent {route_desc}, competitive weekly pay, and a support team that actually supports.",
-        f"CDL-A drivers wanted at {company}. We haul freight across {route_area} from {city_state} with weekly pay, real benefits, and a team that has your back every mile.",
-    ]
-
-    # ── Duties pools (one per tone, 6 items each — drop 1-2 randomly) ─────────
-    duties_pool = {
-        "direct": [
-            f"Drive {route_label}. Cover {route_area}. Stay on schedule.",
-            "Pick up loads and deliver them — safely, on time, every run.",
-            "Pre-trip and post-trip inspections. Every single day. No exceptions.",
-            "Check in with dispatch. Keep them posted. Don't go dark.",
-            "Keep your ELD logs clean and current. Federal law, not optional.",
-            "No-touch freight. Your only job is getting it there in one piece.",
-            "Report any equipment issues immediately — don't nurse a sick truck down the road.",
-            "Follow load instructions to the letter. Pickups, deliveries, paperwork.",
-        ],
-        "professional": [
-            f"Operate a company-assigned Class A vehicle on {route_label.lower()} routes throughout {'the continental United States' if not is_regional else 'the designated service area'}",
-            "Execute safe, timely freight pickups and deliveries in accordance with customer requirements and company standards",
-            "Conduct thorough pre-trip and post-trip vehicle inspections as mandated by DOT regulations",
-            "Maintain consistent communication with the dispatch team regarding load status, ETAs, and any route adjustments",
-            "Ensure full compliance with FMCSA Hours of Service rules and maintain accurate electronic logs at all times",
-            "Handle no-touch dry van freight with care and professionalism from origin to final destination",
-            "Document and report all equipment defects, incidents, or service delays in a timely and accurate manner",
-            "Adhere to all federal, state, and local transportation regulations throughout each assignment",
-        ],
-        "conversational": [
-            f"You'll be running {route_label} across {route_area} — we've got freight everywhere so the miles stay consistent",
-            "Pick up your loads, deliver them on time, treat the customer's dock like your own — that's the standard",
-            "Do your pre-trip and post-trip every day — it protects you and the equipment, no shortcuts",
-            "Stay in touch with your dispatcher — they're in your corner and communication keeps everyone moving",
-            "Keep your ELD logs accurate — we run a clean operation and expect the same from our drivers",
-            "It's all no-touch freight — back in, drop and hook or live unload depending on the customer, you stay in the cab",
-            "If something's wrong with your truck, speak up — we'd rather fix it in a shop than on the side of I-80",
-            "Follow load-specific instructions when they come up — sometimes there's a window, a contact name, or a special procedure",
-        ],
-    }
-
-    # ── Requirements pools (one per tone) ────────────────────────────────────
-    # Optional items (age, work auth) sometimes included
-    reqs_pool = {
+    # ── Tone-locked section titles ──
+    titles = {
         "direct": {
-            "core": [
-                f"CDL-A. Valid. No exceptions.",
-                f"{min_exp} {route_label} experience, minimum.",
-                "Clean MVR — no majors in the last 3 years.",
-                "Current DOT medical card.",
-                "Pass the drug screen and background check.",
-            ],
-            "optional": [
-                "21 or older.",
-                "Must be authorized to work in the U.S.",
-                "No SAP drivers. Must be fully cleared.",
-            ],
+            "pay": "Pay",
+            "route": "Route & Schedule",
+            "benefits": "Benefits",
+            "duties": "Responsibilities",
+            "reqs": "Requirements",
+            "culture": "Why Drivers Stay",
+            "apply": "Apply",
         },
         "professional": {
-            "core": [
-                f"Valid Class A Commercial Driver's License (CDL-A)",
-                f"Minimum of {min_exp} verifiable {route_label.lower()} driving experience",
-                "Clean driving record — no major violations within the past 36 months",
-                "Current DOT medical examiner's certificate",
-                "Ability to successfully complete pre-employment drug screening and background verification",
-            ],
-            "optional": [
-                "Must be 21 years of age or older",
-                "Must be legally authorized to work in the United States",
-                "No active SAP program participation — must be fully return-to-duty cleared",
-            ],
+            "pay": "Compensation",
+            "route": "Routes & Home Time",
+            "benefits": "Benefits & Perks",
+            "duties": "Job Responsibilities",
+            "reqs": "Qualifications",
+            "culture": "What Drivers Value",
+            "apply": "How to Apply",
         },
         "conversational": {
-            "core": [
-                f"You'll need a valid CDL-A — active and in good standing",
-                f"At least {min_exp} of {route_label} experience under your belt",
-                "A clean MVR — no DUIs, reckless driving, or major violations in the past 3 years",
-                "Current DOT physical on file",
-                "You'll need to pass a drug screen and background check before you start",
-            ],
-            "optional": [
-                "Must be 21+ — that's federal, not our rule",
-                "You need to be legally allowed to work in the U.S.",
-                "If you've been through SAP, you'll need to be fully cleared before applying",
-            ],
+            "pay": "The Pay",
+            "route": "Your Routes & Home Time",
+            "benefits": "What You Get",
+            "duties": "What You'll Do",
+            "reqs": "What You Need",
+            "culture": "Why Drivers Choose Us",
+            "apply": "Ready to Roll?",
         },
-    }
+    }[tone]
 
-    # ── "Why Drivers Stay" culture bullets ───────────────────────────────────
-    culture_bullets = [
-        f"Dispatch team that picks up the phone and actually helps",
-        f"Freight that keeps moving — no sitting at the yard waiting for loads",
-        f"Equipment that's maintained — we don't ask you to drive junk",
-        f"A team that treats drivers like the professionals they are",
-        f"Consistent lanes so you know what to expect week to week",
-        f"A safety culture that's real, not just a poster on the wall",
-        f"Direct deposit every Friday without fail",
-        f"No micromanaging — do your job, get your miles, go home",
-        f"Recruiters who are straight with you from day one",
-        f"A company that's been around long enough to know what drivers need",
-    ]
-
-    # ── "About {company}" blurbs ──────────────────────────────────────────────
-    about_blurbs = [
-        f"{company} is a privately held trucking company based in {city_state}. We specialize in dry van {route_label} freight and have built our reputation on consistent loads, reliable pay, and treating drivers with respect. We're not a mega-carrier — and that's by design.",
-        f"Founded and operated out of {city_state}, {company} has been moving freight across the country for years. We run a tight fleet, keep our equipment well-maintained, and invest in the drivers who keep our operation moving. Small enough to care, large enough to keep you rolling.",
-        f"{company} started in {city_state} with a simple idea: run freight the right way. That means good equipment, honest pay, and a dispatch team that has your back. We've grown steadily by doing exactly that — and we're not stopping now.",
-        f"We're a {city_state}-based carrier that believes in doing things the right way — fair pay, honest communication, and freight that actually moves. {company} isn't trying to be the biggest name in trucking. We just want to be the best one to work for.",
-        f"{company} operates out of {city_state} and runs dry van freight coast to coast. We're a close-knit operation where every driver matters and every mile gets paid. If you've been burned by big carriers before, you'll notice the difference here.",
-    ]
-
-    # ── "Apply Today" CTAs ────────────────────────────────────────────────────
-    apply_ctas = [
-        f"Ready to make a move? Apply today and a member of our recruiting team will reach out within 24 hours. We make the process straightforward — no runaround, no bait-and-switch.",
-        f"If {company} sounds like the right fit, don't wait. Apply now and let's talk. We respect your time and we'll give you a straight answer on whether this works for both of us.",
-        f"Applying takes two minutes. If you meet the qualifications and want consistent work with a carrier that delivers on its promises, hit apply and we'll be in touch.",
-        f"Take the next step. Apply today and connect with our team in {city_state}. We're hiring now and we move fast for qualified drivers.",
-        f"Don't let this one sit in your browser. Apply today — our team reviews applications daily and we'll get back to you fast.",
-    ]
-
-    # ── EEO statements (5 variations) ────────────────────────────────────────
-    eeo_statements = [
-        f"{company} is an Equal Opportunity Employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, national origin, age, disability, veteran status, sexual orientation, gender identity, or any other characteristic protected by applicable federal, state, or local law.",
-        f"{company} provides equal employment opportunities to all applicants and employees without regard to race, color, religion, gender, national origin, age, disability, sexual orientation, gender identity, veteran status, or any other legally protected status.",
-        f"We are an equal opportunity employer. Employment decisions at {company} are made without regard to race, color, religion, sex, national origin, age, disability, genetic information, veteran status, sexual orientation, or gender identity.",
-        f"{company} is committed to a diverse and inclusive workplace. We do not discriminate on the basis of race, color, religion, sex, national origin, age, disability, veteran status, or any other characteristic protected by law. All qualified candidates are encouraged to apply.",
-        f"Equal Opportunity Employer — {company} does not discriminate on the basis of race, sex, color, religion, age, national origin, marital status, disability, veteran status, genetic information, sexual orientation, gender identity, or any other reason prohibited by law in the provision of employment opportunities and benefits.",
-    ]
-
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    # ── Helpers ──
     def _ul(items):
         return "<ul>\n" + "".join(f"<li>{i}</li>\n" for i in items) + "</ul>"
 
     def _section(title, content_html):
         return f"<p><b>{title}</b></p>\n{content_html}"
 
-    # ── Build intro (vary length: 1 sentence vs full paragraph) ──────────────
-    raw_intro = random.choice(intros)
-    sentences = [s.strip() for s in raw_intro.replace("—", " — ").split(". ") if s.strip()]
-    if len(sentences) >= 3 and random.random() < 0.3:
-        intro_text = sentences[0] + "."
-    else:
-        intro_text = raw_intro
-    intro_html = f"<p>{intro_text}</p>"
+    # ── 1. Pay & Compensation ──
+    pay_bullets = [f"{pay_range} (weekly gross)", "Paid weekly via direct deposit"]
+    if info.get("orientation_pay"):
+        pay_bullets.append(f"{info['orientation_pay']} paid orientation")
+    if info.get("sign_on_bonus"):
+        pay_bullets.append(f"{info['sign_on_bonus']} sign-on bonus")
+    pay_html = _section(titles["pay"], _ul(pay_bullets))
 
-    # ── Build duties section ──────────────────────────────────────────────────
-    style = random.choice(section_styles)
-    all_duties = duties_pool[tone][:]
-    random.shuffle(all_duties)
-    drop = random.randint(1, 2)
-    duties = all_duties[: max(4, len(all_duties) - drop)]
-
-    # ── Build requirements section ────────────────────────────────────────────
-    pool = reqs_pool[tone]
-    core_reqs = pool["core"][:]
-    optional_reqs = pool["optional"][:]
-    random.shuffle(optional_reqs)
-    num_optional = random.randint(0, len(optional_reqs))
-    reqs = core_reqs + optional_reqs[:num_optional]
-
-    # ── Build pay section (3 presentation styles) ────────────────────────────
-    pay_style = random.randint(0, 2)
-    if pay_style == 0:
-        # pay range as first bullet
-        pay_bullets = [f"{pay_range} weekly"] + perks
-        pay_title = style["pay"]
-        pay_html = _section(pay_title, _ul(pay_bullets))
-    elif pay_style == 1:
-        # intro sentence before bullet list
-        pay_title = style["pay"]
-        pay_intro = f"<p>Competitive weekly pay: <b>{pay_range}</b></p>"
-        pay_html = f"<p><b>{pay_title}</b></p>\n{pay_intro}\n{_ul(perks) if perks else ''}"
-    else:
-        # pay embedded in section heading
-        pay_title = f"{style['pay']} ({pay_range}/wk)"
-        pay_html = _section(pay_title, _ul(perks) if perks else "<p>Competitive pay discussed during hiring process.</p>")
-
-    # ── Build schedule section (3 presentation styles) ────────────────────────
-    sched_style = random.randint(0, 2)
-    if sched_style == 0:
-        sched_html = _section(style["schedule"], _ul([
-            home_time,
-            f"{route_label} routes across {route_area}",
-            "Full-time, consistent freight year-round",
-        ]))
-    elif sched_style == 1:
-        sched_paragraph = (
-            f"Drivers at {company} run {route_label} across {route_area}. "
-            f"{home_time}. "
-            f"This is a full-time position with consistent freight year-round — no seasonal slowdowns."
-        )
-        sched_html = f"<p><b>{style['schedule']}</b></p>\n<p>{sched_paragraph}</p>"
-    else:
-        sched_paragraph = f"We run {route_label} freight out of {city_state}. Freight is consistent and full-time."
-        sched_html = (
-            f"<p><b>{style['schedule']}</b></p>\n"
-            f"<p>{sched_paragraph}</p>\n"
-            + _ul([home_time, route_area.capitalize()])
-        )
-
-    # ── Optional extra sections (0-2 of 3 possible) ──────────────────────────
-    extras_available = []
-
-    # "Why Drivers Stay"
-    stay_bullets = random.sample(culture_bullets, k=random.randint(3, 4))
-    stay_html = _section("Why Drivers Stay", _ul(stay_bullets))
-    extras_available.append(stay_html)
-
-    # "About {company}"
-    about_html = f"<p><b>About {company}</b></p>\n<p>{random.choice(about_blurbs)}</p>"
-    extras_available.append(about_html)
-
-    # "Apply Today"
-    apply_html = f"<p><b>Apply Today</b></p>\n<p>{random.choice(apply_ctas)}</p>"
-    extras_available.append(apply_html)
-
-    random.shuffle(extras_available)
-    num_extras = random.randint(0, 2)
-    chosen_extras = extras_available[:num_extras]
-
-    # ── EEO ──────────────────────────────────────────────────────────────────
-    eeo_html = f"<p><i>{random.choice(eeo_statements)}</i></p>"
-
-    # ── Section order (intro always first, EEO always last) ──────────────────
-    core_sections = [
-        ("duties",   _section(style["duties"], _ul(duties))),
-        ("reqs",     _section(style["reqs"],   _ul(reqs))),
-        ("pay",      pay_html),
-        ("schedule", sched_html),
+    # ── 2. Route & Schedule ──
+    route_bullets = [
+        f"{coverage_adj.capitalize()} {route_label} coverage out of {city_state}",
+        home_time,
+        "No-touch dry van freight",
+        "Modern, well-maintained equipment on every run",
     ]
-    orders = [
-        ["duties", "reqs",     "pay",      "schedule"],
-        ["pay",    "duties",   "reqs",     "schedule"],
-        ["schedule","duties",  "pay",      "reqs"],
-        ["reqs",   "duties",   "pay",      "schedule"],
+    route_html = _section(titles["route"], _ul(route_bullets))
+
+    # ── 3. Intro (opens the posting: who we are + what we do + hook) ──
+    city_only = city_state.split(",")[0].strip() if "," in city_state else city_state
+    coverage_phrase = "a focused multi-state region" if is_regional else "all 48 states"
+    intros = [
+        f"{company} is a {city_only}-based dry van carrier running {route_label} freight across {coverage_phrase}. We invest in our equipment, we invest in our people, and we don't cut corners on either. If you've been driving long enough to know what a well-run operation feels like, you'll recognize it here.",
+        f"Based out of {city_only}, {company} hauls {route_label} dry van freight across {coverage_phrase}. Clean trucks, experienced drivers, and a dispatch team that actually picks up the phone — that's the whole formula.",
+        f"{company} runs {route_label} dry van freight out of {city_only} across {coverage_phrase}. We're not the biggest carrier on the road — we're one of the most dependable. And we're adding experienced CDL-A drivers to the fleet.",
+        f"Out of {city_only}, {company} operates a professional dry van fleet covering {coverage_phrase}. We're hiring CDL-A drivers who want consistent miles, honest pay, and a carrier that delivers on what it promises.",
+        f"{company} is a straightforward {route_label} carrier based in {city_only} — clean trucks, steady freight, and a dispatch team that backs you up. If you've been through carriers that overpromise and underdeliver, this is what different looks like.",
+        f"Headquartered in {city_only}, {company} runs {route_label} dry van freight across {coverage_phrase}. We run a tight operation, we pay consistently, and we don't waste anyone's time with games around home time or settlements.",
+        f"{company} is a {city_only} trucking operation hauling dry van freight across {coverage_phrase}. We hire drivers who take the work seriously. In return, we provide the tools, the freight, and the support to make it worth their while.",
+        f"At {company}, we run {route_label} dry van freight from {city_only} across {coverage_phrase}. Modern equipment, steady freight, and a team that treats drivers like the professionals they are — that's what we offer.",
+        f"{company} hauls {route_label} dry van freight out of {city_only} across {coverage_phrase}. We built this company on consistency — for our customers and for our drivers. You get steady freight, straight pay, and a dispatch team that actually helps.",
+        f"From {city_only}, {company} covers {coverage_phrase} with {route_label} dry van freight. We're hiring drivers who want to work for a carrier that acts like it values them. Honest pay, real home time, well-maintained equipment — that's the pitch.",
+        f"{company} is a {city_only}-based carrier running dry van freight across {coverage_phrase}. Our drivers stay because the work is consistent, the pay is fair, and dispatch doesn't disappear when something goes sideways.",
+        f"Out of {city_only}, {company} runs {route_label} dry van freight across {coverage_phrase}. We believe good drivers deserve a good company — clean equipment, reliable freight, no BS. If that matches what you're looking for, keep reading.",
+        f"{company} operates {route_label} dry van freight from {city_only} across {coverage_phrase}. We're adding experienced CDL-A drivers to the team. If you take pride in the work, you'll fit here.",
+        f"{company} is a {city_only} dry van carrier serving {coverage_phrase}. We run a professional operation — and we expect the same from the people behind the wheel. The basics done right, every week.",
+        f"Based in {city_only}, {company} runs {route_label} dry van freight across {coverage_phrase}. We're a carrier worth driving for. Consistent miles, fair pay, and a team that doesn't disappear when you need them.",
     ]
-    chosen_order = random.choice(orders)
-    section_map = {k: v for k, v in core_sections}
-    ordered_sections = [section_map[k] for k in chosen_order]
+    intro_html = f"<p>{random.choice(intros)}</p>"
 
-    # Inject extras before EEO (spread them around the ordered sections)
-    all_parts = [intro_html] + ordered_sections + chosen_extras + [eeo_html]
+    # ── 4. Benefits ──
+    benefits_html = _section(titles["benefits"], _ul(perks)) if perks else ""
 
-    return "\n\n".join(all_parts)
+    # ── 5. Responsibilities (tone-locked) ──
+    duties_by_tone = {
+        "direct": [
+            f"Safely operate a Class A commercial vehicle on assigned {route_label} lanes across {coverage_noun}",
+            "Complete thorough pre-trip and post-trip inspections per DOT requirements",
+            "Pick up and deliver freight on time per dispatch schedule",
+            "Maintain accurate ELD logs, bills of lading, and delivery documentation",
+            "Keep dispatch informed on load status, ETAs, and any road conditions",
+            "Follow all federal, state, and company safety regulations without exception",
+        ],
+        "professional": [
+            f"Operate a company-assigned Class A vehicle on {route_label.lower()} routes throughout {coverage_noun}",
+            "Execute safe, timely freight pickups and deliveries in accordance with customer and company standards",
+            "Conduct thorough pre-trip and post-trip vehicle inspections in compliance with DOT regulations",
+            "Maintain regular communication with the dispatch team regarding load status, ETAs, and route adjustments",
+            "Ensure full compliance with FMCSA Hours of Service regulations and maintain accurate electronic logs",
+            "Document and report equipment defects, incidents, or service delays in a timely and accurate manner",
+        ],
+        "conversational": [
+            f"Run {route_label} freight across {coverage_noun} out of {city_state}",
+            "Do your pre-trip and post-trip every day — it protects you and the equipment",
+            "Pick up and deliver on time, handle the customer's dock like it's your own",
+            "Keep your ELD logs accurate — we run a clean operation and expect the same from our drivers",
+            "Stay in touch with dispatch — communication keeps everyone moving",
+            "All no-touch dry van — your job is driving, not loading",
+        ],
+    }
+    duties_html = _section(titles["duties"], _ul(duties_by_tone[tone]))
+
+    # ── 6. Requirements (modern, compliant phrasing) ──
+    reqs = [
+        "Valid Class A Commercial Driver's License (CDL-A)",
+        f"Minimum {min_exp} verifiable {route_label} CDL-A driving experience within the past 3 years",
+        "No DUI, reckless driving, or at-fault accidents in the past 36 months",
+        "Current DOT medical examiner's certificate",
+        "Must pass DOT pre-employment drug screening per 49 CFR Part 382",
+        "Must be 21 years of age or older (federal interstate commerce requirement)",
+        "Must not be currently enrolled in a DOT Substance Abuse Professional (SAP) return-to-duty program",
+        "Legally authorized to work in the United States",
+    ]
+    reqs_html = _section(titles["reqs"], _ul(reqs))
+
+    # ── 7. Optional: Why Drivers Stay OR Apply CTA (one of them, coin-flip) ──
+    if random.random() < 0.5:
+        culture_pool = [
+            "Dispatch team that picks up the phone and actually helps",
+            "Freight that keeps moving — no sitting at the yard waiting for loads",
+            "Equipment that's maintained — we don't ask you to drive junk",
+            "A team that treats drivers like the professionals they are",
+            "Consistent lanes so you know what to expect week to week",
+            "A safety culture that's real, not just a poster on the wall",
+            "Direct deposit every week without fail",
+            "No micromanaging — do your job, get your miles, get home",
+            "Straight answers from recruiting — no bait-and-switch",
+            "Drivers who've stayed with us for years, not months",
+        ]
+        bullets = random.sample(culture_pool, k=random.randint(3, 4))
+        extra_html = _section(titles["culture"], _ul(bullets))
+    else:
+        apply_lines = [
+            f"Ready to make a move? Apply today and a member of our recruiting team will reach out within 24 hours. We make the process straightforward — no runaround.",
+            f"If {company} sounds like the right fit, don't wait. Apply now and let's talk. We respect your time and give straight answers.",
+            f"Applying takes two minutes. If you meet the qualifications and want consistent work with a carrier that delivers on its promises, hit apply and we'll be in touch.",
+            f"Take the next step. Apply today to connect with our team. We review applications daily and move fast for qualified drivers.",
+            f"Don't let this one sit. {company} reviews applications daily — apply now and get a real answer quickly.",
+        ]
+        extra_html = f"<p><b>{titles['apply']}</b></p>\n<p>{random.choice(apply_lines)}</p>"
+
+    # ── 8. EEO (modern, full coverage — PWFA + GINA + Bostock) ──
+    eeo_variants = [
+        f"{company} is an Equal Opportunity Employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, sex (including pregnancy, childbirth, and related medical conditions), national origin, age, disability, genetic information, veteran status, sexual orientation, gender identity, or any other characteristic protected by applicable federal, state, or local law.",
+        f"{company} provides equal employment opportunities to all applicants and employees without regard to race, color, religion, sex (including pregnancy, childbirth, and related medical conditions), national origin, age, disability, genetic information, veteran status, sexual orientation, gender identity, or any other legally protected status.",
+        f"Employment decisions at {company} are made without regard to race, color, religion, sex (including pregnancy, childbirth, and related medical conditions), national origin, age, disability, genetic information, veteran status, sexual orientation, gender identity, or any other characteristic protected by federal, state, or local law. {company} is an Equal Opportunity Employer.",
+    ]
+    eeo_html = f"<p><i>{random.choice(eeo_variants)}</i></p>"
+
+    # ── Assemble (fixed order) ──
+    parts = [
+        intro_html,
+        pay_html,
+        route_html,
+    ]
+    if benefits_html:
+        parts.append(benefits_html)
+    parts.extend([duties_html, reqs_html, extra_html, eeo_html])
+
+    return "\n\n".join(parts)
 
 
 def _hex_to_rgb(hex_color: str) -> str:
@@ -1783,11 +738,12 @@ def _build_ctx(info: dict, color: dict, font: tuple) -> dict:
     tagline, sub_tagline = random.choice(HERO_TAGLINES)
     steps = random.choice(HOW_WE_WORK_SETS)
 
-    hero_img = random.choice(_HERO_IMAGES).name if _HERO_IMAGES else "hero_1.jpg"
-    about_names = [i.name for i in _ABOUT_IMAGES]
-    about_img = random.choice(about_names) if about_names else "about_1.jpg"
-    about_img2 = random.choice([n for n in about_names if n != about_img]) if len(about_names) > 1 else about_img
-    coverage_img = random.choice(_COVERAGE_IMAGES).name if _COVERAGE_IMAGES else "coverage_1.jpg"
+    img_state = _load_img_state()
+    hero_img = _pick_unique(_HERO_IMAGES, 1, "hero", img_state, "hero_1.jpg")[0]
+    about_picks = _pick_unique(_ABOUT_IMAGES, 2, "about", img_state, "about_11.jpg")
+    about_img, about_img2 = about_picks[0], about_picks[1]
+    coverage_img = _pick_unique(_COVERAGE_IMAGES, 1, "coverage", img_state, "coverage_21.jpg")[0]
+    _save_img_state(img_state)
 
     company = info["company_name"]
     short = info.get("company_short", company.split()[0])
@@ -2073,571 +1029,12 @@ def _footer(ctx: dict) -> str:
     )
 
 
-# ── HERO VARIANTS ─────────────────────────────────────────────────────────────
-
-def _hero_v1(ctx: dict) -> str:
-    """Full-screen truck image, dark overlay, centered text, 3 stat pills at bottom."""
-    p = ctx["primary"]; pl = ctx["primary_light"]
-    navy = ctx["navy"]; ds = ctx["dark_slate"]
-    fh = ctx["font_heading"]; fb = ctx["font_body"]
-    nr = _hex_to_rgb(navy); dsr = _hex_to_rgb(ds); pr = _hex_to_rgb(p)
-    company = ctx["company_name"]
-    return (
-        "  <section style=\"position:relative; min-height:100vh; display:flex; align-items:center;"
-        " justify-content:center; padding:140px 24px 80px; text-align:center;"
-        f" background:url('images/{ctx['hero_img']}') center/cover no-repeat;\">\n"
-        f"    <div style=\"position:absolute; inset:0; background:linear-gradient(160deg,rgba({nr},0.9) 0%,rgba({dsr},0.78) 100%);\"></div>\n"
-        "    <div style=\"position:relative; z-index:1; max-width:820px; width:100%;\">\n"
-        f"      <div class=\"reveal\" style=\"display:inline-flex; align-items:center; gap:8px; background:rgba({pr},0.15);"
-        f" border:1px solid rgba({pr},0.35); color:{pl}; font-size:0.75rem; font-weight:700;"
-        " padding:6px 18px; border-radius:50px; margin-bottom:28px; letter-spacing:1.5px; text-transform:uppercase;\">\n"
-        "        <span style=\"width:8px; height:8px; border-radius:50%; background:#22C55E; display:inline-block; animation:pulse-dot 2s infinite;\"></span>\n"
-        "        Now Hiring CDL-A Drivers\n"
-        "      </div>\n"
-        f"      <h1 class=\"reveal\" style=\"font-family:'{fh}',sans-serif; font-size:clamp(2.8rem,6vw,4.8rem);"
-        " font-weight:900; color:#fff; line-height:1.06; margin-bottom:22px; letter-spacing:-1.5px;\">"
-        f"{ctx['tagline']}</h1>\n"
-        f"      <p class=\"reveal\" style=\"font-size:1.15rem; color:rgba(255,255,255,0.65); max-width:560px;"
-        f" margin:0 auto 38px; line-height:1.7;\">{ctx['hero_desc']}</p>\n"
-        "      <div class=\"reveal\" style=\"display:flex; gap:14px; justify-content:center; flex-wrap:wrap;\">\n"
-        "        <a href=\"#careers\" class=\"btn btn-primary\">Apply Now</a>\n"
-        "        <a href=\"#about\" class=\"btn btn-outline-light\">Learn More</a>\n"
-        "      </div>\n"
-        "      <div class=\"reveal\" style=\"display:flex; justify-content:center; gap:16px; margin-top:60px; flex-wrap:wrap;\">\n"
-        "        <div style=\"background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12);"
-        f" border-radius:50px; padding:10px 24px; color:#fff; font-size:0.88rem; font-weight:600;\">\U0001f5fa\ufe0f {ctx['routes']}</div>\n"
-        "        <div style=\"background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12);"
-        f" border-radius:50px; padding:10px 24px; color:#fff; font-size:0.88rem; font-weight:600;\">\U0001f69a {ctx['routes_type']}</div>\n"
-        "        <div style=\"background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12);"
-        " border-radius:50px; padding:10px 24px; color:#fff; font-size:0.88rem; font-weight:600;\">\U0001faaa CDL-A Required</div>\n"
-        "      </div>\n"
-        "    </div>\n"
-        "  </section>\n"
-    )
-
-
-def _hero_v2(ctx: dict) -> str:
-    """Split 50/50: dark left panel with logo+stats, right truck image."""
-    p = ctx["primary"]; pl = ctx["primary_light"]
-    navy = ctx["navy"]; fh = ctx["font_heading"]; fb = ctx["font_body"]
-    pay_val = ctx["pay_range"].split("/")[0].strip()
-    return (
-        "  <section style=\"min-height:100vh; display:grid; grid-template-columns:1fr 1fr; padding-top:70px;\">\n"
-        f"    <div style=\"background:{navy}; display:flex; align-items:center; padding:80px 56px;\">\n"
-        "      <div style=\"max-width:480px;\">\n"
-        f"        <div style=\"font-family:'{fh}',sans-serif; font-weight:900; font-size:1.6rem; color:#fff; margin-bottom:48px;\">{ctx['logo_html']}</div>\n"
-        f"        <h1 class=\"reveal-left\" style=\"font-family:'{fh}',sans-serif; font-size:clamp(2.4rem,4vw,3.8rem);"
-        " font-weight:900; color:#fff; line-height:1.08; margin-bottom:22px; letter-spacing:-1px;\">"
-        f"{ctx['tagline']}</h1>\n"
-        f"        <p class=\"reveal-left delay-1\" style=\"font-size:1.05rem; color:rgba(255,255,255,0.6); margin-bottom:36px; line-height:1.7;\">{ctx['hero_desc']}</p>\n"
-        "        <div class=\"reveal-left delay-2\">\n"
-        "          <a href=\"#careers\" class=\"btn btn-primary\">Apply Now</a>\n"
-        "        </div>\n"
-        "        <div class=\"reveal-left delay-3\" style=\"display:flex; flex-direction:column; gap:20px;"
-        " margin-top:52px; padding-top:36px; border-top:1px solid rgba(255,255,255,0.08);\">\n"
-        f"          <div style=\"display:flex; align-items:center; gap:16px;\">\n"
-        f"            <div style=\"font-family:'{fh}',sans-serif; font-size:2.2rem; font-weight:900; color:{pl}; min-width:80px;\">{pay_val}</div>\n"
-        "            <div style=\"font-size:0.82rem; color:rgba(255,255,255,0.45); text-transform:uppercase; letter-spacing:1px;\">Weekly Pay</div>\n"
-        "          </div>\n"
-        f"          <div style=\"display:flex; align-items:center; gap:16px;\">\n"
-        f"            <div style=\"font-family:'{fh}',sans-serif; font-size:2.2rem; font-weight:900; color:{pl}; min-width:80px;\">48</div>\n"
-        "            <div style=\"font-size:0.82rem; color:rgba(255,255,255,0.45); text-transform:uppercase; letter-spacing:1px;\">States Covered</div>\n"
-        "          </div>\n"
-        f"          <div style=\"display:flex; align-items:center; gap:16px;\">\n"
-        f"            <div style=\"font-family:'{fh}',sans-serif; font-size:2.2rem; font-weight:900; color:{pl}; min-width:80px;\">24/7</div>\n"
-        "            <div style=\"font-size:0.82rem; color:rgba(255,255,255,0.45); text-transform:uppercase; letter-spacing:1px;\">Dispatch Support</div>\n"
-        "          </div>\n"
-        "        </div>\n"
-        "      </div>\n"
-        "    </div>\n"
-        f"    <div style=\"background:url('images/{ctx['hero_img']}') center/cover no-repeat; min-height:500px;\"></div>\n"
-        "  </section>\n"
-    )
-
-
-def _hero_v3(ctx: dict) -> str:
-    """Shorter hero left-aligned on dark bg, right image, full-width stats bar below."""
-    p = ctx["primary"]; navy = ctx["navy"]
-    fh = ctx["font_heading"]; fb = ctx["font_body"]
-    pay_val = ctx["pay_range"].split("/")[0].strip()
-    return (
-        f"  <section style=\"background:{navy}; padding:140px 24px 0;\">\n"
-        "    <div style=\"max-width:1200px; margin:0 auto; display:grid; grid-template-columns:1fr 1fr;"
-        " gap:64px; align-items:center; padding-bottom:72px;\">\n"
-        "      <div>\n"
-        f"        <span class=\"section-label reveal\">{ctx['sub_tagline']}</span>\n"
-        f"        <h1 class=\"reveal\" style=\"font-family:'{fh}',sans-serif; font-size:clamp(2.4rem,4.5vw,3.8rem);"
-        " font-weight:900; color:#fff; line-height:1.08; margin-bottom:22px; letter-spacing:-1px;\">"
-        f"{ctx['tagline']}</h1>\n"
-        f"        <p class=\"reveal delay-1\" style=\"font-size:1.05rem; color:rgba(255,255,255,0.6);"
-        f" margin-bottom:36px; line-height:1.7; max-width:460px;\">{ctx['hero_desc']}</p>\n"
-        "        <div class=\"reveal delay-2\" style=\"display:flex; gap:14px; flex-wrap:wrap;\">\n"
-        "          <a href=\"#careers\" class=\"btn btn-primary\">Apply Now</a>\n"
-        "          <a href=\"#about\" class=\"btn btn-outline-light\">About Us</a>\n"
-        "        </div>\n"
-        "      </div>\n"
-        "      <div class=\"reveal-right\" style=\"border-radius:12px; overflow:hidden; box-shadow:0 24px 64px rgba(0,0,0,0.4);\">\n"
-        f"        <img src=\"images/{ctx['hero_img']}\" alt=\"{ctx['company_name']}\" style=\"width:100%; height:420px; object-fit:cover;\">\n"
-        "      </div>\n"
-        "    </div>\n"
-        f"    <div style=\"background:{p}; padding:28px 24px;\">\n"
-        "      <div style=\"max-width:1100px; margin:0 auto; display:grid; grid-template-columns:repeat(4,1fr); gap:20px; text-align:center;\">\n"
-        f"        <div><div style=\"font-family:'{fh}',sans-serif; font-size:1.5rem; font-weight:900; color:#fff;\">{pay_val}</div>"
-        "<div style=\"font-size:0.78rem; color:rgba(255,255,255,0.7); text-transform:uppercase; letter-spacing:1px; margin-top:4px;\">Weekly Pay</div></div>\n"
-        f"        <div><div style=\"font-family:'{fh}',sans-serif; font-size:1.5rem; font-weight:900; color:#fff;\">{ctx['home_time_short']}</div>"
-        "<div style=\"font-size:0.78rem; color:rgba(255,255,255,0.7); text-transform:uppercase; letter-spacing:1px; margin-top:4px;\">Home Time</div></div>\n"
-        f"        <div><div style=\"font-family:'{fh}',sans-serif; font-size:1.5rem; font-weight:900; color:#fff;\">{ctx['min_experience']}</div>"
-        "<div style=\"font-size:0.78rem; color:rgba(255,255,255,0.7); text-transform:uppercase; letter-spacing:1px; margin-top:4px;\">Min. Experience</div></div>\n"
-        f"        <div><div style=\"font-family:'{fh}',sans-serif; font-size:1.5rem; font-weight:900; color:#fff;\">{ctx['routes']}</div>"
-        f"<div style=\"font-size:0.78rem; color:rgba(255,255,255,0.7); text-transform:uppercase; letter-spacing:1px; margin-top:4px;\">{ctx['routes_type']}</div></div>\n"
-        "      </div>\n"
-        "    </div>\n"
-        "  </section>\n"
-    )
-
-
-def _hero_v4(ctx: dict) -> str:
-    """Announcement bar, full-screen hero, centered with 'Now Hiring' badge and large stats."""
-    p = ctx["primary"]; pl = ctx["primary_light"]
-    navy = ctx["navy"]; ds = ctx["dark_slate"]
-    fh = ctx["font_heading"]; fb = ctx["font_body"]
-    nr = _hex_to_rgb(navy); dsr = _hex_to_rgb(ds)
-    city_state = ctx["city_state"]
-    pay_val = ctx["pay_range"].split("/")[0].strip()
-    return (
-        f"  <div style=\"background:{p}; padding:10px 24px; text-align:center; position:fixed; top:70px; width:100%; z-index:900;\">\n"
-        f"    <span style=\"font-family:'{fh}',sans-serif; font-size:0.82rem; font-weight:700; color:#fff; letter-spacing:0.5px;\">\n"
-        f"      \U0001f69b Now Hiring CDL-A Drivers &mdash; {city_state} &mdash;"
-        " <a href=\"#careers\" style=\"color:#fff; text-decoration:underline;\">Apply Today</a>\n"
-        "    </span>\n"
-        "  </div>\n"
-        "  <section style=\"position:relative; min-height:100vh; display:flex; align-items:center;"
-        " justify-content:center; padding:170px 24px 80px; text-align:center;"
-        f" background:url('images/{ctx['hero_img']}') center/cover no-repeat;\">\n"
-        f"    <div style=\"position:absolute; inset:0; background:linear-gradient(180deg,rgba({nr},0.85) 0%,rgba({dsr},0.92) 100%);\"></div>\n"
-        "    <div style=\"position:relative; z-index:1; max-width:760px; width:100%;\">\n"
-        f"      <div class=\"reveal\" style=\"display:inline-block; background:{p}; color:#fff;"
-        f" font-family:'{fh}',sans-serif; font-size:0.72rem; font-weight:800;"
-        " padding:7px 22px; border-radius:50px; margin-bottom:28px; letter-spacing:2px; text-transform:uppercase;\">\u2736 Now Hiring \u2736</div>\n"
-        f"      <h1 class=\"reveal\" style=\"font-family:'{fh}',sans-serif; font-size:clamp(2.8rem,6vw,5rem);"
-        f" font-weight:900; color:#fff; line-height:1.05; margin-bottom:22px; letter-spacing:-1.5px;\">{ctx['tagline']}</h1>\n"
-        f"      <p class=\"reveal delay-1\" style=\"font-size:1.12rem; color:rgba(255,255,255,0.62);"
-        f" margin:0 auto 40px; max-width:540px; line-height:1.7;\">{ctx['hero_desc']}</p>\n"
-        "      <div class=\"reveal delay-2\" style=\"display:flex; gap:14px; justify-content:center; flex-wrap:wrap;\">\n"
-        "        <a href=\"#careers\" class=\"btn btn-primary\" style=\"font-size:1rem; padding:16px 40px;\">Apply Now &mdash; CDL-A</a>\n"
-        "      </div>\n"
-        "      <div class=\"reveal delay-3\" style=\"display:flex; justify-content:center; gap:40px; margin-top:56px; flex-wrap:wrap;\">\n"
-        f"        <div style=\"text-align:center;\"><div style=\"font-family:'{fh}',sans-serif; font-size:2.4rem; font-weight:900; color:{pl};\">{pay_val}</div>"
-        "<div style=\"font-size:0.78rem; color:rgba(255,255,255,0.45); text-transform:uppercase; letter-spacing:1.5px; margin-top:6px;\">Per Week</div></div>\n"
-        "        <div style=\"width:1px; background:rgba(255,255,255,0.1);\"></div>\n"
-        f"        <div style=\"text-align:center;\"><div style=\"font-family:'{fh}',sans-serif; font-size:2.4rem; font-weight:900; color:{pl};\">48</div>"
-        "<div style=\"font-size:0.78rem; color:rgba(255,255,255,0.45); text-transform:uppercase; letter-spacing:1.5px; margin-top:6px;\">States</div></div>\n"
-        "        <div style=\"width:1px; background:rgba(255,255,255,0.1);\"></div>\n"
-        f"        <div style=\"text-align:center;\"><div style=\"font-family:'{fh}',sans-serif; font-size:2.4rem; font-weight:900; color:{pl};\">{ctx['home_time_short']}</div>"
-        "<div style=\"font-size:0.78rem; color:rgba(255,255,255,0.45); text-transform:uppercase; letter-spacing:1.5px; margin-top:6px;\">Home Time</div></div>\n"
-        "      </div>\n"
-        "    </div>\n"
-        "  </section>\n"
-    )
-
-
-def _hero_v5(ctx: dict) -> str:
-    """Minimal clean: light bg, large company name, accent tagline, truck card below."""
-    p = ctx["primary"]; ab = ctx["accent_bg"]; abl = ctx["accent_bg_light"]
-    navy = ctx["navy"]; fh = ctx["font_heading"]; fb = ctx["font_body"]
-    company = ctx["company_name"]
-    return (
-        f"  <section style=\"background:{abl}; padding:140px 24px 0; overflow:hidden;\">\n"
-        "    <div style=\"max-width:1100px; margin:0 auto;\">\n"
-        "      <div style=\"text-align:center; margin-bottom:56px;\">\n"
-        f"        <div class=\"reveal\" style=\"display:inline-block; background:{ab}; color:{p};"
-        f" font-family:'{fh}',sans-serif; font-size:0.72rem; font-weight:800;"
-        " padding:7px 20px; border-radius:50px; margin-bottom:24px; letter-spacing:2px; text-transform:uppercase;\">CDL-A Positions Open</div>\n"
-        f"        <h1 class=\"reveal\" style=\"font-family:'{fh}',sans-serif; font-size:clamp(2.2rem,5vw,4rem);"
-        f" font-weight:900; color:{navy}; line-height:1.08; margin-bottom:4px; letter-spacing:-1px;\">{company}</h1>\n"
-        f"        <div class=\"reveal delay-1\" style=\"font-family:'{fh}',sans-serif; font-size:clamp(1.3rem,3vw,2.2rem);"
-        f" font-weight:700; color:{p}; margin-bottom:24px;\">{ctx['tagline']}</div>\n"
-        f"        <p class=\"reveal delay-2\" style=\"font-size:1.05rem; color:#64748B; max-width:520px;"
-        f" margin:0 auto 36px; line-height:1.72;\">{ctx['hero_desc']}</p>\n"
-        "        <div class=\"reveal delay-3\">\n"
-        "          <a href=\"#careers\" class=\"btn btn-primary\" style=\"font-size:1rem; padding:15px 40px;\">View Open Positions</a>\n"
-        "        </div>\n"
-        "      </div>\n"
-        "      <div class=\"reveal\" style=\"border-radius:16px 16px 0 0; overflow:hidden; box-shadow:0 -8px 48px rgba(0,0,0,0.1);\">\n"
-        f"        <img src=\"images/{ctx['hero_img']}\" alt=\"{company}\" style=\"width:100%; height:400px; object-fit:cover; display:block;\">\n"
-        "      </div>\n"
-        "    </div>\n"
-        "  </section>\n"
-    )
-
-
-# ── PROCESS VARIANTS ──────────────────────────────────────────────────────────
-
-def _process_v1(ctx: dict) -> str:
-    """3 horizontal numbered cards on light bg, number in accent circle."""
-    p = ctx["primary"]; ab = ctx["accent_bg"]; g50 = ctx["gray_50"]
-    navy = ctx["navy"]; fh = ctx["font_heading"]; pr = _hex_to_rgb(p)
-    steps = ctx["steps"]
-    cards = ""
-    for i, (title, desc) in enumerate(steps, 1):
-        cards += (
-            f"        <div class=\"reveal delay-{i}\" style=\"background:#fff; border:1px solid #E2E8F0; border-radius:12px;"
-            f" padding:40px 32px; transition:border-color 0.3s,box-shadow 0.3s,transform 0.3s;\""
-            f" onmouseover=\"this.style.borderColor='{p}';this.style.transform='translateY(-5px)';this.style.boxShadow='0 12px 36px rgba({pr},0.1)'\""
-            f" onmouseout=\"this.style.borderColor='#E2E8F0';this.style.transform='';this.style.boxShadow=''\">\n"
-            f"          <div style=\"width:52px; height:52px; border-radius:50%; background:{ab}; color:{p};"
-            f" display:flex; align-items:center; justify-content:center;"
-            f" font-family:'{fh}',sans-serif; font-size:1.25rem; font-weight:900; margin-bottom:22px;\">0{i}</div>\n"
-            f"          <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.2rem; font-weight:800; color:{navy}; margin-bottom:10px;\">{title}</h3>\n"
-            f"          <p style=\"font-size:0.94rem; color:#64748B; line-height:1.65;\">{desc}</p>\n"
-            "        </div>\n"
-        )
-    return (
-        f"  <section class=\"section\" style=\"background:{g50};\" id=\"process\">\n"
-        "    <div class=\"container\">\n"
-        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:56px;\">\n"
-        "        <span class=\"section-label\">How We Work</span>\n"
-        "        <h2 class=\"section-heading\">Simple Process. Consistent Results.</h2>\n"
-        "        <p class=\"section-desc\" style=\"margin:0 auto;\">From first contact to final delivery, we keep it professional every step of the way.</p>\n"
-        "      </div>\n"
-        "      <div style=\"display:grid; grid-template-columns:repeat(3,1fr); gap:24px;\">\n"
-        + cards
-        + "      </div>\n"
-        "    </div>\n"
-        "  </section>\n"
-    )
-
-
-def _process_v2(ctx: dict) -> str:
-    """Dark section, large outlined numbers, arrows between steps."""
-    p = ctx["primary"]; pl = ctx["primary_light"]
-    navy = ctx["navy"]; fh = ctx["font_heading"]
-    steps = ctx["steps"]
-    items = ""
-    for i, (title, desc) in enumerate(steps, 1):
-        items += (
-            f"        <div class=\"reveal delay-{i}\" style=\"flex:1; text-align:center; padding:40px 24px;\">\n"
-            f"          <div style=\"font-family:'{fh}',sans-serif; font-size:5rem; font-weight:900; line-height:1;"
-            " color:transparent; -webkit-text-stroke:2px rgba(255,255,255,0.15); margin-bottom:20px;\">"
-            f"0{i}</div>\n"
-            f"          <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.2rem; font-weight:800; color:#fff; margin-bottom:12px;\">{title}</h3>\n"
-            f"          <p style=\"font-size:0.92rem; color:rgba(255,255,255,0.55); line-height:1.65;\">{desc}</p>\n"
-            "        </div>\n"
-        )
-        if i < len(steps):
-            items += "        <div style=\"color:rgba(255,255,255,0.15); font-size:2rem; align-self:center; margin-top:-32px;\">&rsaquo;</div>\n"
-    return (
-        f"  <section class=\"section\" style=\"background:{navy};\" id=\"process\">\n"
-        "    <div class=\"container\">\n"
-        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:60px;\">\n"
-        "        <span class=\"section-label\">Our Process</span>\n"
-        "        <h2 class=\"section-heading section-heading-light\">How It Works</h2>\n"
-        "        <p class=\"section-desc\" style=\"margin:0 auto; color:rgba(255,255,255,0.5);\">Three steps. Zero complications.</p>\n"
-        "      </div>\n"
-        "      <div style=\"display:flex; align-items:flex-start; gap:8px; flex-wrap:wrap;\">\n"
-        + items
-        + "      </div>\n"
-        "    </div>\n"
-        "  </section>\n"
-    )
-
-
-def _process_v3(ctx: dict) -> str:
-    """Vertical left-side timeline with numbered dots, alternating accent colors."""
-    p = ctx["primary"]; pl = ctx["primary_light"]
-    navy = ctx["navy"]; g50 = ctx["gray_50"]; fh = ctx["font_heading"]
-    steps = ctx["steps"]
-    accent_colors = [p, pl, p]
-    rows = ""
-    for i, (title, desc) in enumerate(steps, 1):
-        ac = accent_colors[(i - 1) % len(accent_colors)]
-        line = (
-            "            <div style=\"position:absolute; top:44px; left:21px; width:2px;"
-            " height:calc(100% + 32px); background:rgba(0,0,0,0.06);\"></div>\n"
-        ) if i < len(steps) else ""
-        rows += (
-            f"          <div class=\"reveal\" style=\"display:flex; gap:28px; position:relative; padding-bottom:{'48' if i < len(steps) else '0'}px;\">\n"
-            + line
-            + "            <div style=\"flex-shrink:0;\">\n"
-            f"              <div style=\"width:44px; height:44px; border-radius:50%; background:{ac}; color:#fff;"
-            f" display:flex; align-items:center; justify-content:center;"
-            f" font-family:'{fh}',sans-serif; font-size:1rem; font-weight:900; position:relative; z-index:1;\">0{i}</div>\n"
-            "            </div>\n"
-            "            <div style=\"padding-top:8px;\">\n"
-            f"              <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.2rem; font-weight:800; color:{navy}; margin-bottom:8px;\">{title}</h3>\n"
-            f"              <p style=\"font-size:0.94rem; color:#64748B; line-height:1.65;\">{desc}</p>\n"
-            "            </div>\n"
-            "          </div>\n"
-        )
-    return (
-        f"  <section class=\"section\" style=\"background:{g50};\" id=\"process\">\n"
-        "    <div class=\"container\">\n"
-        "      <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:80px; align-items:center;\">\n"
-        "        <div class=\"reveal-left\">\n"
-        "          <span class=\"section-label\">How We Work</span>\n"
-        f"          <h2 class=\"section-heading\">From Your Call to the Final Drop</h2>\n"
-        "          <p class=\"section-desc\" style=\"margin-top:12px;\">Our process is built around reliability &mdash; consistent pickups, real-time communication, and on-time delivery every time.</p>\n"
-        "        </div>\n"
-        "        <div style=\"display:flex; flex-direction:column;\">\n"
-        + rows
-        + "        </div>\n"
-        "      </div>\n"
-        "    </div>\n"
-        "  </section>\n"
-    )
-
-
-def _process_v4(ctx: dict) -> str:
-    """Light bg, each step as wide horizontal row: huge number | divider | title+desc."""
-    p = ctx["primary"]; abl = ctx["accent_bg_light"]
-    navy = ctx["navy"]; fh = ctx["font_heading"]
-    steps = ctx["steps"]
-    rows = ""
-    for i, (title, desc) in enumerate(steps, 1):
-        rows += (
-            f"        <div class=\"reveal\" style=\"display:flex; align-items:center; background:#fff;"
-            " border:1px solid #E2E8F0; border-radius:12px; overflow:hidden;"
-            " transition:box-shadow 0.3s;\""
-            " onmouseover=\"this.style.boxShadow='0 8px 28px rgba(0,0,0,0.07)'\""
-            " onmouseout=\"this.style.boxShadow=''\">\n"
-            f"          <div style=\"background:{abl}; padding:40px 36px; min-width:100px; text-align:center; flex-shrink:0;\">\n"
-            f"            <span style=\"font-family:'{fh}',sans-serif; font-size:3.5rem; font-weight:900; color:{p}; line-height:1;\">0{i}</span>\n"
-            "          </div>\n"
-            "          <div style=\"width:1px; background:#E2E8F0; align-self:stretch;\"></div>\n"
-            "          <div style=\"padding:32px 36px;\">\n"
-            f"            <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.2rem; font-weight:800; color:{navy}; margin-bottom:8px;\">{title}</h3>\n"
-            f"            <p style=\"font-size:0.94rem; color:#64748B; line-height:1.65;\">{desc}</p>\n"
-            "          </div>\n"
-            "        </div>\n"
-        )
-    return (
-        "  <section class=\"section\" id=\"process\" style=\"background:#fff;\">\n"
-        "    <div class=\"container\">\n"
-        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:52px;\">\n"
-        "        <span class=\"section-label\">Our Process</span>\n"
-        "        <h2 class=\"section-heading\">How We Get It Done</h2>\n"
-        "        <p class=\"section-desc\" style=\"margin:0 auto;\">Every load handled with professionalism from start to finish.</p>\n"
-        "      </div>\n"
-        "      <div style=\"display:flex; flex-direction:column; gap:16px; max-width:900px; margin:0 auto;\">\n"
-        + rows
-        + "      </div>\n"
-        "    </div>\n"
-        "  </section>\n"
-    )
-
-
-def _process_v5(ctx: dict) -> str:
-    """Dark bg, 3 emoji icon cards in a row, minimal centered text."""
-    p = ctx["primary"]; navy = ctx["navy"]; fh = ctx["font_heading"]
-    steps = ctx["steps"]
-    icons = ["\U0001f4cb", "\U0001f69a", "\u2705"]
-    cards = ""
-    for i, (title, desc) in enumerate(steps):
-        cards += (
-            f"        <div class=\"reveal delay-{i+1}\" style=\"text-align:center; padding:48px 28px;"
-            " background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07);"
-            " border-radius:12px; transition:border-color 0.3s,transform 0.3s;\""
-            f" onmouseover=\"this.style.borderColor='{p}';this.style.transform='translateY(-5px)'\""
-            " onmouseout=\"this.style.borderColor='rgba(255,255,255,0.07)';this.style.transform=''\">\n"
-            f"          <div style=\"font-size:3rem; margin-bottom:20px;\">{icons[i % len(icons)]}</div>\n"
-            f"          <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.2rem; font-weight:800; color:#fff; margin-bottom:12px;\">{title}</h3>\n"
-            f"          <p style=\"font-size:0.92rem; color:rgba(255,255,255,0.5); line-height:1.65; max-width:280px; margin:0 auto;\">{desc}</p>\n"
-            "        </div>\n"
-        )
-    return (
-        f"  <section class=\"section\" style=\"background:{navy};\" id=\"process\">\n"
-        "    <div class=\"container\">\n"
-        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:56px;\">\n"
-        "        <span class=\"section-label\">Process</span>\n"
-        "        <h2 class=\"section-heading section-heading-light\">How We Work</h2>\n"
-        "      </div>\n"
-        "      <div style=\"display:grid; grid-template-columns:repeat(3,1fr); gap:20px;\">\n"
-        + cards
-        + "      </div>\n"
-        "    </div>\n"
-        "  </section>\n"
-    )
-
-
-# ── ABOUT VARIANTS ────────────────────────────────────────────────────────────
-
 def _checklist_html(items):
     return "".join(
         f"<li class=\"check-item\"><span class=\"check-dot\">&#10003;</span> {item}</li>"
         for item in items
     )
 
-
-def _about_v1(ctx: dict) -> str:
-    """Image left, text right with checklist and CTA."""
-    p = ctx["primary"]; navy = ctx["navy"]; fh = ctx["font_heading"]
-    return (
-        "  <section class=\"section\" style=\"background:#fff;\" id=\"about\">\n"
-        "    <div class=\"container\">\n"
-        "      <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:72px; align-items:center;\">\n"
-        "        <div class=\"reveal-left\">\n"
-        f"          <img src=\"images/{ctx['about_img']}\" alt=\"{ctx['company_name']}\" style=\"width:100%; height:480px; object-fit:cover; border-radius:12px; box-shadow:0 8px 40px rgba(0,0,0,0.1);\">\n"
-        "        </div>\n"
-        "        <div class=\"reveal-right\">\n"
-        "          <span class=\"section-label\">About Us</span>\n"
-        f"          <h2 class=\"section-heading\" style=\"margin-bottom:18px;\">{ctx['about_title']}</h2>\n"
-        f"          <p style=\"font-size:1rem; color:#64748B; line-height:1.72; margin-bottom:28px;\">{ctx['about_desc']}</p>\n"
-        f"          <ul class=\"check-list\" style=\"margin-bottom:32px;\">{_checklist_html(ctx['about_checklist'])}</ul>\n"
-        "          <a href=\"#careers\" class=\"btn btn-outline-dark\">View Open Positions</a>\n"
-        "        </div>\n"
-        "      </div>\n"
-        "    </div>\n"
-        "  </section>\n"
-    )
-
-
-def _about_v2(ctx: dict) -> str:
-    """Text left, image right, pull-quote in accent color."""
-    p = ctx["primary"]; ab = ctx["accent_bg"]; navy = ctx["navy"]; fh = ctx["font_heading"]
-    return (
-        f"  <section class=\"section\" style=\"background:{ctx['accent_bg_light']};\" id=\"about\">\n"
-        "    <div class=\"container\">\n"
-        "      <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:72px; align-items:center;\">\n"
-        "        <div class=\"reveal-left\">\n"
-        f"          <span class=\"section-label\">About {ctx['company_name']}</span>\n"
-        f"          <h2 class=\"section-heading\" style=\"margin-bottom:18px;\">{ctx['about_title']}</h2>\n"
-        f"          <p style=\"font-size:1rem; color:#64748B; line-height:1.72; margin-bottom:28px;\">{ctx['about_desc']}</p>\n"
-        f"          <blockquote style=\"border-left:4px solid {p}; padding:16px 20px; background:{ab}; border-radius:0 8px 8px 0; margin-bottom:28px;\">\n"
-        f"            <p style=\"font-family:'{fh}',sans-serif; font-size:1.05rem; font-weight:700; color:{navy}; font-style:italic;\">&ldquo;We move freight the right way &mdash; safe, on time, and without excuses.&rdquo;</p>\n"
-        "          </blockquote>\n"
-        f"          <ul class=\"check-list\">{_checklist_html(ctx['about_checklist'][:3])}</ul>\n"
-        "        </div>\n"
-        "        <div class=\"reveal-right\">\n"
-        f"          <img src=\"images/{ctx['about_img']}\" alt=\"{ctx['company_name']}\" style=\"width:100%; height:480px; object-fit:cover; border-radius:12px; box-shadow:0 8px 40px rgba(0,0,0,0.1);\">\n"
-        "        </div>\n"
-        "      </div>\n"
-        "    </div>\n"
-        "  </section>\n"
-    )
-
-
-def _about_v3(ctx: dict) -> str:
-    """Dark bg, heading+desc left, 3 stat boxes right."""
-    p = ctx["primary"]; pl = ctx["primary_light"]
-    navy = ctx["navy"]; fh = ctx["font_heading"]
-    _is_regional = "regional" in ctx.get("routes_type", "OTR Routes").lower()
-    if _is_regional:
-        route_stat = ("Multi", "State Coverage", "Focused regional lanes with consistent freight")
-    else:
-        route_stat = ("48", "States Covered", "Full lower-48 coverage, year-round freight")
-    stat_rows = "".join(
-        f"          <div style=\"background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);"
-        f" border-radius:12px; padding:28px 32px; display:flex; align-items:center; gap:24px;\">\n"
-        f"            <div style=\"font-family:'{fh}',sans-serif; font-size:3rem; font-weight:900; color:{pl}; min-width:80px;\">{val}</div>\n"
-        f"            <div><div style=\"font-family:'{fh}',sans-serif; font-size:1rem; font-weight:700; color:#fff; margin-bottom:4px;\">{title}</div>"
-        f"<div style=\"font-size:0.88rem; color:rgba(255,255,255,0.45);\">{sub}</div></div>\n"
-        "          </div>\n"
-        for val, title, sub in [
-            route_stat,
-            ("24/7", "Dispatch Available", "Our team is always on \u2014 day or night"),
-            ("CDL", "Class A Drivers", "Professional, vetted, experienced team"),
-        ]
-    )
-    return (
-        f"  <section class=\"section\" style=\"background:{navy};\" id=\"about\">\n"
-        "    <div class=\"container\">\n"
-        "      <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:80px; align-items:center;\">\n"
-        "        <div class=\"reveal-left\">\n"
-        "          <span class=\"section-label\">Who We Are</span>\n"
-        f"          <h2 class=\"section-heading section-heading-light\" style=\"margin-bottom:22px;\">{ctx['about_title']}</h2>\n"
-        f"          <p style=\"font-size:1rem; color:rgba(255,255,255,0.57); line-height:1.75; margin-bottom:32px;\">{ctx['about_desc']}</p>\n"
-        "          <a href=\"#careers\" class=\"btn btn-primary\">Join Our Team</a>\n"
-        "        </div>\n"
-        "        <div class=\"reveal-right\" style=\"display:flex; flex-direction:column; gap:20px;\">\n"
-        + stat_rows
-        + "        </div>\n"
-        "      </div>\n"
-        "    </div>\n"
-        "  </section>\n"
-    )
-
-
-def _about_v4(ctx: dict) -> str:
-    """3 feature cards: icon + title + desc."""
-    p = ctx["primary"]; navy = ctx["navy"]; g50 = ctx["gray_50"]
-    fh = ctx["font_heading"]; pr = _hex_to_rgb(p)
-    _is_regional = "regional" in ctx.get("routes_type", "OTR Routes").lower()
-    if _is_regional:
-        coverage_card = ("\U0001f5fa\ufe0f", "Regional Coverage",
-            "We run dedicated regional lanes with consistent freight and familiar routes. Focused coverage that keeps drivers close to home.")
-    else:
-        coverage_card = ("\U0001f5fa\ufe0f", "48 State Coverage",
-            "We run freight across the entire lower 48 with consistent lanes and year-round volume. Wherever your load needs to go, we have the coverage.")
-    features = [
-        ("\U0001f9d1\u200d\u2708\ufe0f", "Professional Drivers",
-         "Every driver on our team is vetted, experienced, and committed to safe, on-time delivery. We don't cut corners on who we put behind the wheel."),
-        coverage_card,
-        ("\U0001f4e6", "No-Touch Dry Van",
-         "All freight is strictly no-touch. Our drivers focus on driving \u2014 pickups and deliveries are handled cleanly and professionally."),
-    ]
-    cards = "".join(
-        f"        <div class=\"reveal delay-{i}\" style=\"background:#fff; border:1px solid #E2E8F0; border-radius:12px;"
-        f" padding:40px 28px; transition:box-shadow 0.3s,transform 0.3s;\""
-        f" onmouseover=\"this.style.boxShadow='0 10px 32px rgba({pr},0.1)';this.style.transform='translateY(-4px)'\""
-        " onmouseout=\"this.style.boxShadow='';this.style.transform=''\">\n"
-        f"          <div style=\"font-size:2.4rem; margin-bottom:18px;\">{icon}</div>\n"
-        f"          <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.2rem; font-weight:800; color:{navy}; margin-bottom:10px;\">{title}</h3>\n"
-        f"          <p style=\"font-size:0.93rem; color:#64748B; line-height:1.65;\">{desc}</p>\n"
-        "        </div>\n"
-        for i, (icon, title, desc) in enumerate(features, 1)
-    )
-    return (
-        f"  <section class=\"section\" style=\"background:{g50};\" id=\"about\">\n"
-        "    <div class=\"container\">\n"
-        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:56px;\">\n"
-        "        <span class=\"section-label\">About Us</span>\n"
-        "        <h2 class=\"section-heading\">A Carrier Built on the Right Values</h2>\n"
-        f"        <p class=\"section-desc\" style=\"margin:0 auto;\">{ctx['about_desc']}</p>\n"
-        "      </div>\n"
-        "      <div style=\"display:grid; grid-template-columns:repeat(3,1fr); gap:24px;\">\n"
-        + cards
-        + "      </div>\n"
-        "    </div>\n"
-        "  </section>\n"
-    )
-
-
-def _about_v5(ctx: dict) -> str:
-    """Alternating rows using about_img and coverage_img."""
-    p = ctx["primary"]; navy = ctx["navy"]; fh = ctx["font_heading"]
-    company = ctx["company_name"]
-
-    def _row(img, label, title, desc, checklist, flip=False):
-        img_block = (
-            f"<div class=\"{'reveal-right' if flip else 'reveal-left'}\">"
-            f"<img src=\"images/{img}\" alt=\"{company}\" style=\"width:100%; height:420px; object-fit:cover; border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.08);\"></div>"
-        )
-        text_block = (
-            f"<div class=\"{'reveal-left' if flip else 'reveal-right'}\">"
-            f"<span class=\"section-label\">{label}</span>"
-            f"<h2 class=\"section-heading\" style=\"margin-bottom:16px;\">{title}</h2>"
-            f"<p style=\"font-size:1rem; color:#64748B; line-height:1.72; margin-bottom:24px;\">{desc}</p>"
-            f"<ul class=\"check-list\">{_checklist_html(checklist[:3])}</ul></div>"
-        )
-        order = f"{text_block}\n        {img_block}" if flip else f"{img_block}\n        {text_block}"
-        return (
-            "      <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:72px; align-items:center;\">\n"
-            f"        {order}\n"
-            "      </div>\n"
-        )
-
-    return (
-        "  <section class=\"section\" style=\"background:#fff;\" id=\"about\">\n"
-        "    <div class=\"container\">\n"
-        + _row(ctx["about_img"], "About Us", ctx["about_title"], ctx["about_desc"], ctx["about_checklist"])
-        + "      <div style=\"height:80px;\"></div>\n"
-        + _row(ctx["coverage_img"], "Coverage", ctx["coverage_title"], ctx["coverage_desc"], ctx["coverage_checklist"], flip=True)
-        + "    </div>\n"
-        "  </section>\n"
-    )
-
-
-# ── CAREERS VARIANTS ──────────────────────────────────────────────────────────
 
 def _stat_cards_dark(ctx: dict) -> str:
     """4 stat cards styled for dark background."""
@@ -2673,65 +1070,714 @@ def _stat_cards_light(ctx: dict) -> str:
     )
 
 
-def _careers_v1(ctx: dict) -> str:
-    """Dark navy bg, centered, job title+pay in big text, 4 stat cards, 2-col perks."""
+# ── HERO VARIANTS ─────────────────────────────────────────────────────
+
+def _hero_v1(ctx: dict) -> str:
+    """Route-ticker hero: dark bg, headline, horizontal ticker strip of fake lane pairs."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; ds = ctx["dark_slate"]
+    fh = ctx["font_heading"]; fb = ctx["font_body"]
+    nr = _hex_to_rgb(navy); pr = _hex_to_rgb(p)
+    company = ctx["company_name"]
+    lanes = "CHI \u2192 DAL\u2002\u00b7\u2002ATL \u2192 LAX\u2002\u00b7\u2002MIA \u2192 NYC\u2002\u00b7\u2002DEN \u2192 SEA\u2002\u00b7\u2002HOU \u2192 PHX\u2002\u00b7\u2002DTW \u2192 STL\u2002\u00b7\u2002CLT \u2192 BOS\u2002\u00b7\u2002PHL \u2192 MEM"
+    return (
+        f"  <section style=\"position:relative; min-height:100vh; display:flex; flex-direction:column;"
+        f" align-items:center; justify-content:center; padding:140px 24px 60px; text-align:center;"
+        f" background:url('images/{ctx['hero_img']}') center/cover no-repeat;\">\n"
+        f"    <div style=\"position:absolute; inset:0; background:linear-gradient(180deg,rgba({nr},0.93) 0%,rgba({nr},0.80) 100%);\"></div>\n"
+        "    <div style=\"position:relative; z-index:1; max-width:860px; width:100%; flex:1; display:flex; flex-direction:column; justify-content:center;\">\n"
+        f"      <div class=\"reveal\" style=\"display:inline-flex; gap:8px; align-items:center; justify-content:center;"
+        f" background:rgba({pr},0.18); border:1px solid rgba({pr},0.4); color:{pl};"
+        " font-size:0.72rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; padding:6px 20px; border-radius:50px; margin-bottom:28px;\">"
+        "\U0001f4f5\u2002DISPATCH LIVE\n"
+        "      </div>\n"
+        f"      <h1 class=\"reveal\" style=\"font-family:'{fh}',sans-serif; font-size:clamp(2.6rem,5.5vw,4.6rem);"
+        " font-weight:900; color:#fff; line-height:1.06; margin-bottom:20px; letter-spacing:-1.5px;\">"
+        f"{ctx['tagline']}</h1>\n"
+        f"      <p class=\"reveal delay-1\" style=\"font-size:1.1rem; color:rgba(255,255,255,0.6); max-width:540px;"
+        f" margin:0 auto 36px; line-height:1.72;\">{ctx['hero_desc']}</p>\n"
+        "      <div class=\"reveal delay-2\" style=\"display:flex; gap:14px; justify-content:center; flex-wrap:wrap;\">\n"
+        "        <a href=\"#careers\" class=\"btn btn-primary\">Apply Now</a>\n"
+        "        <a href=\"#contact\" class=\"btn btn-outline-light\">Get a Quote</a>\n"
+        "      </div>\n"
+        "    </div>\n"
+        "    <div style=\"position:relative; z-index:1; width:100%; overflow:hidden;"
+        f" border-top:1px solid rgba({pr},0.25); padding:16px 0; background:rgba(0,0,0,0.35);\">\n"
+        f"      <p style=\"font-family:'Courier New',monospace; font-size:0.78rem; font-weight:700; color:{pl};"
+        " letter-spacing:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-align:center; margin:0;\">"
+        f"\U0001f6e3\ufe0f\u2002ACTIVE LANES:\u2002{lanes}</p>\n"
+        "    </div>\n"
+        "  </section>\n"
+    )
+
+
+def _hero_v2(ctx: dict) -> str:
+    """Diagonal clip-path split: dark-left copy panel + right truck image."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
+    nr = _hex_to_rgb(navy); pr = _hex_to_rgb(p)
+    pay_val = ctx["pay_range"].split("/")[0].strip()
+    return (
+        "  <section style=\"position:relative; min-height:100vh; display:flex; padding-top:70px; overflow:hidden;\">\n"
+        f"    <div style=\"position:relative; z-index:2; width:55%; background:{navy};"
+        " clip-path:polygon(0 0,100% 0,88% 100%,0 100%); padding:100px 80px 80px 48px;"
+        " display:flex; align-items:center;\">\n"
+        "      <div style=\"max-width:480px;\">\n"
+        f"        <div class=\"reveal\" style=\"font-size:0.72rem; font-weight:700; letter-spacing:3px;"
+        f" text-transform:uppercase; color:{pl}; margin-bottom:16px;\">\U0001f69a CDL-A · Now Hiring</div>\n"
+        f"        <h1 class=\"reveal\" style=\"font-family:'{fh}',sans-serif; font-size:clamp(2.4rem,4vw,3.8rem);"
+        " font-weight:900; color:#fff; line-height:1.07; margin-bottom:20px; letter-spacing:-1px;\">"
+        f"{ctx['tagline']}</h1>\n"
+        f"        <p class=\"reveal delay-1\" style=\"font-size:1.02rem; color:rgba(255,255,255,0.58);"
+        f" margin-bottom:32px; line-height:1.72; max-width:420px;\">{ctx['hero_desc']}</p>\n"
+        "        <div class=\"reveal delay-2\" style=\"display:flex; gap:14px; flex-wrap:wrap;\">\n"
+        "          <a href=\"#careers\" class=\"btn btn-primary\">Apply Now</a>\n"
+        "          <a href=\"#about\" class=\"btn btn-outline-light\">About Us</a>\n"
+        "        </div>\n"
+        f"        <div class=\"reveal delay-3\" style=\"margin-top:44px; display:flex; gap:32px; flex-wrap:wrap;\">\n"
+        f"          <div><div style=\"font-family:'{fh}',sans-serif; font-size:1.7rem; font-weight:900; color:{pl};\">{pay_val}</div>"
+        "<div style=\"font-size:0.75rem; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:1px; margin-top:3px;\">Weekly Pay</div></div>\n"
+        f"          <div><div style=\"font-family:'{fh}',sans-serif; font-size:1.7rem; font-weight:900; color:{pl};\">{ctx['home_time_short']}</div>"
+        "<div style=\"font-size:0.75rem; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:1px; margin-top:3px;\">Home Time</div></div>\n"
+        "        </div>\n"
+        "      </div>\n"
+        "    </div>\n"
+        f"    <div style=\"position:absolute; right:0; top:0; bottom:0; width:55%;"
+        f" background:url('images/{ctx['hero_img']}') center/cover no-repeat;\"></div>\n"
+        "  </section>\n"
+    )
+
+
+def _hero_v3(ctx: dict) -> str:
+    """Pay-centered hero: huge pay number as visual anchor, truck image right, minimal copy."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
+    nr = _hex_to_rgb(navy)
+    pay_val = ctx["pay_range"].split("/")[0].strip()
+    return (
+        f"  <section style=\"background:{navy}; min-height:100vh; display:flex; align-items:center;"
+        " padding:120px 24px 80px; overflow:hidden;\">\n"
+        "    <div style=\"max-width:1200px; margin:0 auto; width:100%; display:grid;"
+        " grid-template-columns:1fr 1fr; gap:48px; align-items:center;\">\n"
+        "      <div class=\"reveal-left\">\n"
+        f"        <div style=\"font-size:0.72rem; font-weight:700; letter-spacing:3px;"
+        f" text-transform:uppercase; color:{pl}; margin-bottom:14px;\">CDL-A &middot; {ctx['routes_type']}</div>\n"
+        f"        <div style=\"font-family:'{fh}',sans-serif; font-size:clamp(4rem,9vw,8rem);"
+        f" font-weight:900; color:{pl}; line-height:0.9; letter-spacing:-4px; margin-bottom:6px;\">{pay_val}</div>\n"
+        f"        <div style=\"font-family:'{fh}',sans-serif; font-size:1.05rem; font-weight:700;"
+        f" color:rgba(255,255,255,0.5); margin-bottom:28px;\">Per Week &middot; {ctx['routes']}</div>\n"
+        f"        <h2 class=\"reveal\" style=\"font-family:'{fh}',sans-serif; font-size:clamp(1.4rem,2.5vw,2rem);"
+        f" font-weight:800; color:#fff; line-height:1.2; margin-bottom:18px;\">{ctx['tagline']}</h2>\n"
+        f"        <p class=\"reveal delay-1\" style=\"font-size:0.98rem; color:rgba(255,255,255,0.52);"
+        f" margin-bottom:32px; line-height:1.72; max-width:440px;\">{ctx['hero_desc']}</p>\n"
+        "        <div class=\"reveal delay-2\" style=\"display:flex; gap:14px; flex-wrap:wrap;\">\n"
+        "          <a href=\"#careers\" class=\"btn btn-primary\" style=\"padding:14px 36px;\">Apply Today</a>\n"
+        "        </div>\n"
+        "      </div>\n"
+        "      <div class=\"reveal-right\" style=\"border-radius:16px; overflow:hidden; box-shadow:0 32px 80px rgba(0,0,0,0.5);\">\n"
+        f"        <img src=\"images/{ctx['hero_img']}\" alt=\"{ctx['company_name']}\" style=\"width:100%; height:520px; object-fit:cover; display:block;\">\n"
+        "      </div>\n"
+        "    </div>\n"
+        "  </section>\n"
+    )
+
+
+def _hero_v4(ctx: dict) -> str:
+    """Blueprint/specs style: grid-paper SVG bg, stenciled headline, spec readout."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
+    pr = _hex_to_rgb(p)
+    pay_val = ctx["pay_range"].split("/")[0].strip()
+    specs = [
+        ("FLEET TYPE", ctx["routes_type"]),
+        ("LANES", ctx["routes"]),
+        ("HOME TIME", ctx["home_time_short"]),
+        ("MIN EXP", ctx["min_experience"]),
+        ("PAY RATE", pay_val + "/WK"),
+        ("DISPATCH", "24 / 7"),
+    ]
+    spec_html = "".join(
+        f"<div style=\"border:1px solid rgba({pr},0.35); border-radius:4px; padding:12px 16px;\">"
+        f"<div style=\"font-size:0.62rem; letter-spacing:2px; color:rgba(255,255,255,0.38); margin-bottom:4px;\">{k}</div>"
+        f"<div style=\"font-family:'Courier New',monospace; font-size:0.92rem; font-weight:700; color:{pl};\">{v}</div>"
+        "</div>"
+        for k, v in specs
+    )
+    return (
+        f"  <section style=\"position:relative; min-height:100vh; display:flex; align-items:center;"
+        f" padding:140px 24px 80px; background:{navy}; overflow:hidden;\">\n"
+        "    <!-- Blueprint grid SVG -->\n"
+        f"    <svg style=\"position:absolute; inset:0; width:100%; height:100%; opacity:0.07;\" xmlns=\"http://www.w3.org/2000/svg\">"
+        "<defs><pattern id=\"bgrid\" width=\"40\" height=\"40\" patternUnits=\"userSpaceOnUse\">"
+        f"<path d=\"M 40 0 L 0 0 0 40\" fill=\"none\" stroke=\"{pl}\" stroke-width=\"0.5\"/></pattern></defs>"
+        "<rect width=\"100%\" height=\"100%\" fill=\"url(#bgrid)\"/></svg>\n"
+        "    <div style=\"position:relative; z-index:1; max-width:1000px; margin:0 auto; width:100%;\">\n"
+        "      <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:64px; align-items:center;\">\n"
+        "        <div class=\"reveal-left\">\n"
+        f"          <div style=\"font-family:'Courier New',monospace; font-size:0.68rem; font-weight:700;"
+        f" letter-spacing:3px; color:{pl}; margin-bottom:20px;\">// SPEC SHEET &middot; {ctx['company_short']}</div>\n"
+        f"          <h1 style=\"font-family:'{fh}',sans-serif; font-size:clamp(2.6rem,5vw,4.2rem);"
+        " font-weight:900; color:#fff; line-height:1.07; letter-spacing:-1px; margin-bottom:20px;\">"
+        f"{ctx['tagline']}</h1>\n"
+        f"          <p style=\"font-size:1rem; color:rgba(255,255,255,0.55); margin-bottom:32px; line-height:1.72;\">{ctx['hero_desc']}</p>\n"
+        "          <a href=\"#careers\" class=\"btn btn-primary\">View Open Positions</a>\n"
+        "        </div>\n"
+        "        <div class=\"reveal-right\">\n"
+        f"          <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:12px;\">{spec_html}</div>\n"
+        "        </div>\n"
+        "      </div>\n"
+        "    </div>\n"
+        "  </section>\n"
+    )
+
+
+def _hero_v5(ctx: dict) -> str:
+    """Magazine-cover style: oversized number, bold headline, corner stamps, truck image strip."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
+    pr = _hex_to_rgb(p); nr = _hex_to_rgb(navy)
+    company = ctx["company_name"]
+    year = ctx["year"]
+    return (
+        f"  <section style=\"background:{navy}; min-height:100vh; padding:120px 24px 0; overflow:hidden;\">\n"
+        "    <div style=\"max-width:1200px; margin:0 auto;\">\n"
+        "      <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:32px; align-items:flex-end;\">\n"
+        "        <div>\n"
+        f"          <div class=\"reveal\" style=\"font-family:'{fh}',sans-serif; font-size:clamp(7rem,15vw,13rem);"
+        " font-weight:900; line-height:0.85; color:transparent; -webkit-text-stroke:2px rgba(255,255,255,0.08);"
+        f" margin-bottom:-16px; letter-spacing:-6px; user-select:none;\">{year}</div>\n"
+        f"          <h1 class=\"reveal\" style=\"font-family:'{fh}',sans-serif; font-size:clamp(2.4rem,4.5vw,3.6rem);"
+        " font-weight:900; color:#fff; line-height:1.06; margin-bottom:18px; letter-spacing:-1px;"
+        f" position:relative; z-index:1;\">{ctx['tagline']}</h1>\n"
+        f"          <p class=\"reveal delay-1\" style=\"font-size:1rem; color:rgba(255,255,255,0.55);"
+        f" margin-bottom:28px; line-height:1.72; max-width:480px;\">{ctx['hero_desc']}</p>\n"
+        "          <div class=\"reveal delay-2\" style=\"display:flex; gap:12px; flex-wrap:wrap; align-items:center;\">\n"
+        "            <a href=\"#careers\" class=\"btn btn-primary\">Apply Now</a>\n"
+        f"            <span style=\"background:{p}; color:#fff; font-family:'{fh}',sans-serif; font-size:0.68rem;"
+        " font-weight:800; letter-spacing:2px; text-transform:uppercase; padding:6px 14px; border-radius:4px;\">\U00002605 CDL-A</span>\n"
+        f"            <span style=\"border:2px solid rgba(255,255,255,0.2); color:rgba(255,255,255,0.6); font-family:'{fh}',sans-serif; font-size:0.68rem;"
+        f" font-weight:800; letter-spacing:2px; text-transform:uppercase; padding:5px 14px; border-radius:4px;\">{ctx['routes']}</span>\n"
+        "          </div>\n"
+        "        </div>\n"
+        "        <div class=\"reveal-right\" style=\"border-radius:16px 16px 0 0; overflow:hidden; margin-top:32px;\">\n"
+        f"          <img src=\"images/{ctx['hero_img']}\" alt=\"{company}\" style=\"width:100%; height:480px; object-fit:cover; display:block;\">\n"
+        "        </div>\n"
+        "      </div>\n"
+        "    </div>\n"
+        "  </section>\n"
+    )
+
+
+# ── PROCESS VARIANTS ──────────────────────────────────────────────────
+
+def _process_v1(ctx: dict) -> str:
+    """Before/After comparison table: without-us (X) vs. with-us (check) columns."""
+    p = ctx["primary"]; ab = ctx["accent_bg"]; abl = ctx["accent_bg_light"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
+    rows = [
+        ("Real-time load tracking", False, True),
+        ("24/7 dispatch coverage", False, True),
+        ("On-time delivery — every load", False, True),
+        ("No-touch dry van freight", False, True),
+        ("Transparent communication", False, True),
+        ("Professional, vetted drivers", False, True),
+    ]
+    row_html = "".join(
+        f"<tr style=\"border-bottom:1px solid #E2E8F0;\">"
+        f"<td style=\"padding:14px 20px; font-size:0.92rem; color:#334155;\">{label}</td>"
+        f"<td style=\"padding:14px 20px; text-align:center; font-size:1.1rem;\">"
+        f"{'<span style=\"color:#EF4444;\">&#10007;</span>' if not without else '<span style=\"color:#22C55E;\">&#10003;</span>'}"
+        f"</td>"
+        f"<td style=\"padding:14px 20px; text-align:center; font-size:1.1rem;\">"
+        f"{'<span style=\"color:#22C55E;\">&#10003;</span>' if with_us else '<span style=\"color:#EF4444;\">&#10007;</span>'}"
+        f"</td>"
+        "</tr>"
+        for label, without, with_us in rows
+    )
+    return (
+        f"  <section class=\"section\" style=\"background:{abl};\" id=\"process\">\n"
+        "    <div class=\"container\">\n"
+        "      <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:72px; align-items:center;\">\n"
+        "        <div class=\"reveal-left\">\n"
+        "          <span class=\"section-label\">Why Us</span>\n"
+        f"          <h2 class=\"section-heading\">The Difference Is Real</h2>\n"
+        "          <p class=\"section-desc\" style=\"margin-top:12px;\">Not all carriers are built the same. See what sets us apart from the typical freight operation.</p>\n"
+        "          <a href=\"#contact\" class=\"btn btn-primary\" style=\"margin-top:28px; display:inline-block;\">Get a Quote</a>\n"
+        "        </div>\n"
+        "        <div class=\"reveal-right\" style=\"overflow:hidden; border-radius:12px; box-shadow:0 8px 40px rgba(0,0,0,0.08);\">\n"
+        "          <table style=\"width:100%; border-collapse:collapse; background:#fff;\">\n"
+        "            <thead>\n"
+        f"              <tr style=\"background:{navy};\">\n"
+        f"                <th style=\"padding:16px 20px; text-align:left; font-family:'{fh}',sans-serif; font-size:0.8rem; font-weight:700; color:rgba(255,255,255,0.6); letter-spacing:1px; text-transform:uppercase;\">Feature</th>\n"
+        f"                <th style=\"padding:16px 20px; text-align:center; font-family:'{fh}',sans-serif; font-size:0.8rem; font-weight:700; color:rgba(255,255,255,0.4); letter-spacing:1px; text-transform:uppercase;\">Others</th>\n"
+        f"                <th style=\"padding:16px 20px; text-align:center; font-family:'{fh}',sans-serif; font-size:0.8rem; font-weight:700; color:{ctx['primary_light']}; letter-spacing:1px; text-transform:uppercase;\">Us</th>\n"
+        "              </tr>\n"
+        "            </thead>\n"
+        f"            <tbody>{row_html}</tbody>\n"
+        "          </table>\n"
+        "        </div>\n"
+        "      </div>\n"
+        "    </div>\n"
+        "  </section>\n"
+    )
+
+
+def _process_v2(ctx: dict) -> str:
+    """Stacked numbered rows with a key-metric on the right per step."""
+    p = ctx["primary"]; abl = ctx["accent_bg_light"]; ab = ctx["accent_bg"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
+    steps = ctx["steps"]
+    metrics = ["&lt; 24h", "&lt; 1h", "100%"]
+    metric_labels = ["Response Time", "Dispatch", "On-Time Rate"]
+    rows = ""
+    for i, (title, desc) in enumerate(steps, 1):
+        metric = metrics[(i - 1) % len(metrics)]
+        mlabel = metric_labels[(i - 1) % len(metric_labels)]
+        rows += (
+            f"        <div class=\"reveal\" style=\"display:flex; align-items:center; gap:0;"
+            " background:#fff; border:1px solid #E2E8F0; border-radius:12px; overflow:hidden;"
+            " transition:box-shadow 0.3s;\""
+            " onmouseover=\"this.style.boxShadow='0 8px 28px rgba(0,0,0,0.07)'\""
+            " onmouseout=\"this.style.boxShadow=''\">\n"
+            f"          <div style=\"background:{abl}; padding:36px 28px; min-width:72px; text-align:center; flex-shrink:0; align-self:stretch; display:flex; align-items:center; justify-content:center;\">\n"
+            f"            <span style=\"font-family:'{fh}',sans-serif; font-size:2.8rem; font-weight:900; color:{p}; line-height:1;\">0{i}</span>\n"
+            "          </div>\n"
+            "          <div style=\"flex:1; padding:28px 32px;\">\n"
+            f"            <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.15rem; font-weight:800; color:{navy}; margin-bottom:8px;\">{title}</h3>\n"
+            f"            <p style=\"font-size:0.92rem; color:#64748B; line-height:1.65;\">{desc}</p>\n"
+            "          </div>\n"
+            f"          <div style=\"background:{ab}; padding:28px 32px; text-align:center; flex-shrink:0; min-width:110px; align-self:stretch; display:flex; flex-direction:column; align-items:center; justify-content:center;\">\n"
+            f"            <div style=\"font-family:'{fh}',sans-serif; font-size:1.5rem; font-weight:900; color:{p}; margin-bottom:4px;\">{metric}</div>\n"
+            f"            <div style=\"font-size:0.7rem; color:#64748B; text-transform:uppercase; letter-spacing:1px;\">{mlabel}</div>\n"
+            "          </div>\n"
+            "        </div>\n"
+        )
+    return (
+        "  <section class=\"section\" style=\"background:#fff;\" id=\"process\">\n"
+        "    <div class=\"container\">\n"
+        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:52px;\">\n"
+        "        <span class=\"section-label\">Our Process</span>\n"
+        "        <h2 class=\"section-heading\">How We Deliver Every Time</h2>\n"
+        "        <p class=\"section-desc\" style=\"margin:0 auto;\">Simple, accountable, measurable. Three steps we execute without fail.</p>\n"
+        "      </div>\n"
+        "      <div style=\"display:flex; flex-direction:column; gap:16px; max-width:960px; margin:0 auto;\">\n"
+        + rows
+        + "      </div>\n"
+        "    </div>\n"
+        "  </section>\n"
+    )
+
+
+def _process_v3(ctx: dict) -> str:
+    """Photo-accent cards: each step card has a thin truck-image strip across the top."""
+    p = ctx["primary"]; ab = ctx["accent_bg"]
+    navy = ctx["navy"]; g50 = ctx["gray_50"]; fh = ctx["font_heading"]
+    steps = ctx["steps"]
+    images = [ctx["hero_img"], ctx["about_img"], ctx["coverage_img"]]
+    icons = ["\U0001f4cb", "\U0001f69a", "\u2705"]
+    cards = ""
+    for i, (title, desc) in enumerate(steps, 1):
+        img = images[(i - 1) % len(images)]
+        icon = icons[(i - 1) % len(icons)]
+        cards += (
+            f"        <div class=\"reveal delay-{i}\" style=\"background:#fff; border:1px solid #E2E8F0; border-radius:12px;"
+            " overflow:hidden; transition:transform 0.3s,box-shadow 0.3s;\""
+            " onmouseover=\"this.style.transform='translateY(-5px)';this.style.boxShadow='0 12px 36px rgba(0,0,0,0.1)'\""
+            " onmouseout=\"this.style.transform='';this.style.boxShadow=''\">\n"
+            f"          <div style=\"height:100px; background:url('images/{img}') center/cover no-repeat; position:relative;\">\n"
+            f"            <div style=\"position:absolute; inset:0; background:rgba(0,0,0,0.45);\"></div>\n"
+            f"            <div style=\"position:absolute; bottom:12px; left:16px; font-size:1.6rem;\">{icon}</div>\n"
+            f"            <div style=\"position:absolute; bottom:12px; right:16px; font-family:'{fh}',sans-serif;"
+            f" font-size:1.5rem; font-weight:900; color:rgba(255,255,255,0.15); line-height:1;\">0{i}</div>\n"
+            "          </div>\n"
+            "          <div style=\"padding:28px 28px;\">\n"
+            f"            <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.15rem; font-weight:800; color:{navy}; margin-bottom:10px;\">{title}</h3>\n"
+            f"            <p style=\"font-size:0.92rem; color:#64748B; line-height:1.65;\">{desc}</p>\n"
+            "          </div>\n"
+            "        </div>\n"
+        )
+    return (
+        f"  <section class=\"section\" style=\"background:{g50};\" id=\"process\">\n"
+        "    <div class=\"container\">\n"
+        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:52px;\">\n"
+        "        <span class=\"section-label\">How We Work</span>\n"
+        "        <h2 class=\"section-heading\">From Booking to Delivery</h2>\n"
+        "        <p class=\"section-desc\" style=\"margin:0 auto;\">Three steps, zero confusion. Here's exactly what to expect when you haul with us.</p>\n"
+        "      </div>\n"
+        "      <div style=\"display:grid; grid-template-columns:repeat(3,1fr); gap:24px;\">\n"
+        + cards
+        + "      </div>\n"
+        "    </div>\n"
+        "  </section>\n"
+    )
+
+
+def _process_v4(ctx: dict) -> str:
+    """Highway road SVG with 3 pin-style milestones along a curved line."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
+    steps = ctx["steps"]
+    pr = _hex_to_rgb(p)
+    step_items = ""
+    pct = [20, 50, 80]
+    for i, (title, desc) in enumerate(steps, 1):
+        left = pct[(i - 1) % len(pct)]
+        step_items += (
+            f"      <div class=\"reveal\" style=\"position:absolute; left:{left}%; top:50%; transform:translate(-50%,-50%); text-align:center; width:200px;\">\n"
+            f"        <div style=\"width:48px; height:48px; border-radius:50%; background:{p}; color:#fff;"
+            f" display:flex; align-items:center; justify-content:center; font-family:'{fh}',sans-serif;"
+            " font-size:1.1rem; font-weight:900; margin:0 auto 12px; box-shadow:0 4px 16px rgba(0,0,0,0.25);\">0{i}</div>\n"
+            f"        <div style=\"font-family:'{fh}',sans-serif; font-size:0.92rem; font-weight:800; color:{navy}; margin-bottom:4px;\">{title}</div>\n"
+            f"        <div style=\"font-size:0.8rem; color:#64748B; line-height:1.55;\">{desc[:60]}...</div>\n"
+            "      </div>\n"
+        )
+    return (
+        "  <section class=\"section\" style=\"background:#fff;\" id=\"process\">\n"
+        "    <div class=\"container\">\n"
+        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:48px;\">\n"
+        "        <span class=\"section-label\">The Journey</span>\n"
+        "        <h2 class=\"section-heading\">Your Load's Path to Delivery</h2>\n"
+        "        <p class=\"section-desc\" style=\"margin:0 auto;\">Every shipment follows the same proven route from first call to final drop.</p>\n"
+        "      </div>\n"
+        "      <!-- Road diagram -->\n"
+        "      <div style=\"position:relative; height:260px; margin:0 auto; max-width:960px;\">\n"
+        "        <svg style=\"position:absolute; inset:0; width:100%; height:100%;\" viewBox=\"0 0 960 260\" preserveAspectRatio=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n"
+        "          <path d=\"M 0 180 Q 240 60 480 130 Q 720 200 960 80\" fill=\"none\" stroke=\"#E2E8F0\" stroke-width=\"12\" stroke-linecap=\"round\"/>\n"
+        f"          <path d=\"M 0 180 Q 240 60 480 130 Q 720 200 960 80\" fill=\"none\" stroke=\"{p}\" stroke-width=\"4\" stroke-linecap=\"round\" stroke-dasharray=\"12 8\"/>\n"
+        "        </svg>\n"
+        + step_items
+        + "      </div>\n"
+        "      <div style=\"display:grid; grid-template-columns:repeat(3,1fr); gap:24px; max-width:960px; margin:24px auto 0;\">\n"
+        + "".join(
+            f"        <div class=\"reveal delay-{i}\" style=\"padding:28px; border-left:3px solid {p}; background:{ctx['accent_bg_light']};\">\n"
+            f"          <h3 style=\"font-family:'{fh}',sans-serif; font-size:1rem; font-weight:800; color:{navy}; margin-bottom:8px;\">{title}</h3>\n"
+            f"          <p style=\"font-size:0.9rem; color:#64748B; line-height:1.65;\">{desc}</p>\n"
+            "        </div>\n"
+            for i, (title, desc) in enumerate(steps, 1)
+        )
+        + "      </div>\n"
+        "    </div>\n"
+        "  </section>\n"
+    )
+
+
+def _process_v5(ctx: dict) -> str:
+    """Quote/testimonial per step: each step framed as a driver quote in a speech bubble."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
+    steps = ctx["steps"]
+    pr = _hex_to_rgb(p)
+    driver_names = ["Mike R., Driver", "Carlos T., Driver", "James W., Driver"]
+    cards = ""
+    for i, (title, desc) in enumerate(steps, 1):
+        name = driver_names[(i - 1) % len(driver_names)]
+        cards += (
+            f"        <div class=\"reveal delay-{i}\" style=\"background:#fff; border:1px solid #E2E8F0; border-radius:16px;"
+            " padding:36px 32px; position:relative; transition:box-shadow 0.3s;\""
+            f" onmouseover=\"this.style.boxShadow='0 10px 32px rgba({pr},0.1)'\""
+            " onmouseout=\"this.style.boxShadow=''\">\n"
+            f"          <div style=\"font-size:3rem; color:{p}; line-height:1; margin-bottom:12px; font-family:Georgia,serif;\">&ldquo;</div>\n"
+            f"          <p style=\"font-size:0.96rem; color:#334155; line-height:1.72; margin-bottom:20px; font-style:italic;\">{desc}</p>\n"
+            f"          <div style=\"border-top:1px solid #E2E8F0; padding-top:16px; display:flex; align-items:center; justify-content:space-between;\">\n"
+            f"            <div style=\"font-family:'{fh}',sans-serif; font-size:0.88rem; font-weight:700; color:{navy};\">{title}</div>\n"
+            f"            <div style=\"font-size:0.78rem; color:#94A3B8;\">{name}</div>\n"
+            "          </div>\n"
+            "        </div>\n"
+        )
+    return (
+        f"  <section class=\"section\" style=\"background:{ctx['gray_50']};\" id=\"process\">\n"
+        "    <div class=\"container\">\n"
+        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:52px;\">\n"
+        "        <span class=\"section-label\">The Process</span>\n"
+        "        <h2 class=\"section-heading\">Drivers Know. Here's the Story.</h2>\n"
+        "        <p class=\"section-desc\" style=\"margin:0 auto;\">From first call to final delivery, our process speaks for itself.</p>\n"
+        "      </div>\n"
+        "      <div style=\"display:grid; grid-template-columns:repeat(3,1fr); gap:24px;\">\n"
+        + cards
+        + "      </div>\n"
+        "    </div>\n"
+        "  </section>\n"
+    )
+
+
+# ── ABOUT VARIANTS ────────────────────────────────────────────────────
+
+def _about_v1(ctx: dict) -> str:
+    """Stats overlay on full-width truck image: semi-transparent panels over the photo."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
+    nr = _hex_to_rgb(navy)
+    _is_regional = "regional" in ctx.get("routes_type", "OTR Routes").lower()
+    coverage_val = "Multi-State" if _is_regional else "48 States"
+    stats = [
+        (coverage_val, "Coverage"),
+        ("24/7", "Dispatch"),
+        ("CDL-A", "Drivers"),
+        ("100%", "No-Touch"),
+    ]
+    stat_panels = "".join(
+        f"<div style=\"background:rgba({nr},0.82); border:1px solid rgba(255,255,255,0.1);"
+        " border-radius:10px; padding:20px 24px; text-align:center;\">"
+        f"<div style=\"font-family:'{fh}',sans-serif; font-size:1.6rem; font-weight:900; color:{pl}; margin-bottom:4px;\">{val}</div>"
+        f"<div style=\"font-size:0.72rem; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:1px;\">{lbl}</div>"
+        "</div>"
+        for val, lbl in stats
+    )
+    return (
+        "  <section style=\"position:relative; overflow:hidden;\" id=\"about\">\n"
+        f"    <img src=\"images/{ctx['about_img']}\" alt=\"{ctx['company_name']}\" style=\"width:100%; height:560px; object-fit:cover; display:block;\">\n"
+        f"    <div style=\"position:absolute; inset:0; background:linear-gradient(90deg,rgba({nr},0.75) 0%,rgba({nr},0.25) 60%,transparent 100%);\"></div>\n"
+        "    <div style=\"position:absolute; inset:0; display:flex; align-items:center; padding:0 48px;\">\n"
+        "      <div class=\"reveal-left\" style=\"max-width:480px;\">\n"
+        "        <span class=\"section-label\">About Us</span>\n"
+        f"        <h2 style=\"font-family:'{fh}',sans-serif; font-size:clamp(1.8rem,3.5vw,2.8rem);"
+        " font-weight:900; color:#fff; line-height:1.1; margin-bottom:16px;\">"
+        f"{ctx['about_title']}</h2>\n"
+        f"        <p style=\"font-size:0.97rem; color:rgba(255,255,255,0.65); line-height:1.72; margin-bottom:28px;\">{ctx['about_desc']}</p>\n"
+        "        <a href=\"#careers\" class=\"btn btn-primary\">Join Our Team</a>\n"
+        "      </div>\n"
+        "    </div>\n"
+        f"    <div class=\"reveal\" style=\"position:absolute; bottom:24px; right:32px;"
+        f" display:grid; grid-template-columns:repeat(4,1fr); gap:12px; max-width:560px;\">{stat_panels}</div>\n"
+        "  </section>\n"
+    )
+
+
+def _about_v2(ctx: dict) -> str:
+    """Centered pull-quote layout: about_title as blockquote, about_img as full background."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
+    nr = _hex_to_rgb(navy)
+    return (
+        f"  <section style=\"position:relative; padding:120px 24px;\" id=\"about\">\n"
+        f"    <div style=\"position:absolute; inset:0; background:url('images/{ctx['about_img']}') center/cover no-repeat;\"></div>\n"
+        f"    <div style=\"position:absolute; inset:0; background:rgba({nr},0.88);\"></div>\n"
+        "    <div style=\"position:relative; z-index:1; max-width:820px; margin:0 auto; text-align:center;\">\n"
+        "      <div class=\"reveal\">\n"
+        "        <span class=\"section-label\">About Us</span>\n"
+        f"        <blockquote style=\"font-family:'{fh}',sans-serif; font-size:clamp(1.5rem,3vw,2.4rem);"
+        " font-weight:800; color:#fff; line-height:1.3; font-style:italic; margin:24px 0;"
+        f" border-left:none; padding:0;\">&ldquo;{ctx['about_title']}&rdquo;</blockquote>\n"
+        f"        <p style=\"font-size:1rem; color:rgba(255,255,255,0.58); line-height:1.75; margin-bottom:36px;\">{ctx['about_desc']}</p>\n"
+        f"        <ul class=\"check-list\" style=\"display:inline-flex; flex-direction:column; text-align:left; margin:0 auto 36px; color:rgba(255,255,255,0.8);\">{_checklist_html(ctx['about_checklist'][:3])}</ul>\n"
+        "        <div>\n"
+        "          <a href=\"#careers\" class=\"btn btn-primary\">View Open Positions</a>\n"
+        "        </div>\n"
+        "      </div>\n"
+        "    </div>\n"
+        "  </section>\n"
+    )
+
+
+def _about_v3(ctx: dict) -> str:
+    """Feature-stat grid + image row: stat numbers with about_img on right."""
+    p = ctx["primary"]; ab = ctx["accent_bg"]; abl = ctx["accent_bg_light"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
+    pr = _hex_to_rgb(p)
+    _is_regional = "regional" in ctx.get("routes_type", "OTR Routes").lower()
+    states_val = "Multi-State" if _is_regional else "48 States"
+    feat_stats = [
+        (states_val, "Coverage", "\U0001f5fa\ufe0f"),
+        ("24/7", "Dispatch", "\U0001f550"),
+        ("CDL-A", "All Drivers", "\U0001f9d1\u200d\u2708\ufe0f"),
+        ("No-Touch", "Dry Van", "\U0001f4e6"),
+    ]
+    grid_html = "".join(
+        f"<div class=\"reveal delay-{i}\" style=\"background:#fff; border:1px solid #E2E8F0; border-radius:12px;"
+        f" padding:28px 24px; text-align:center; transition:box-shadow 0.3s,transform 0.3s;\""
+        f" onmouseover=\"this.style.boxShadow='0 8px 24px rgba({pr},0.1)';this.style.transform='translateY(-4px)'\""
+        " onmouseout=\"this.style.boxShadow='';this.style.transform=''\">"
+        f"<div style=\"font-size:2rem; margin-bottom:10px;\">{icon}</div>"
+        f"<div style=\"font-family:'{fh}',sans-serif; font-size:1.4rem; font-weight:900; color:{p}; margin-bottom:4px;\">{val}</div>"
+        f"<div style=\"font-size:0.78rem; color:#64748B; text-transform:uppercase; letter-spacing:1px;\">{lbl}</div>"
+        "</div>"
+        for i, (val, lbl, icon) in enumerate(feat_stats, 1)
+    )
+    return (
+        f"  <section class=\"section\" style=\"background:{abl};\" id=\"about\">\n"
+        "    <div class=\"container\">\n"
+        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:52px;\">\n"
+        f"        <span class=\"section-label\">About {ctx['company_name']}</span>\n"
+        f"        <h2 class=\"section-heading\">{ctx['about_title']}</h2>\n"
+        f"        <p class=\"section-desc\" style=\"margin:0 auto;\">{ctx['about_desc']}</p>\n"
+        "      </div>\n"
+        "      <div style=\"display:grid; grid-template-columns:repeat(4,1fr); gap:20px; margin-bottom:52px;\">\n"
+        + grid_html
+        + "      </div>\n"
+        "      <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:56px; align-items:center;\">\n"
+        "        <div class=\"reveal-left\">\n"
+        "          <span class=\"section-label\">What We Haul</span>\n"
+        f"          <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.6rem; font-weight:800; color:{navy}; margin-bottom:14px;\">{ctx['coverage_title']}</h3>\n"
+        f"          <p style=\"font-size:0.97rem; color:#64748B; line-height:1.72; margin-bottom:24px;\">{ctx['coverage_desc']}</p>\n"
+        f"          <ul class=\"check-list\">{_checklist_html(ctx['coverage_checklist'][:3])}</ul>\n"
+        "        </div>\n"
+        "        <div class=\"reveal-right\" style=\"border-radius:12px; overflow:hidden; box-shadow:0 8px 32px rgba(0,0,0,0.1);\">\n"
+        f"          <img src=\"images/{ctx['coverage_img']}\" alt=\"{ctx['company_name']}\" style=\"width:100%; height:360px; object-fit:cover; display:block;\">\n"
+        "        </div>\n"
+        "      </div>\n"
+        "    </div>\n"
+        "  </section>\n"
+    )
+
+
+def _about_v4(ctx: dict) -> str:
+    """Vertical image strip: about_img stacked above coverage_img on one side, story on other."""
+    p = ctx["primary"]; navy = ctx["navy"]; fh = ctx["font_heading"]
+    return (
+        "  <section class=\"section\" style=\"background:#fff;\" id=\"about\">\n"
+        "    <div class=\"container\">\n"
+        "      <div style=\"display:grid; grid-template-columns:1fr 1.2fr; gap:56px; align-items:stretch;\">\n"
+        "        <div class=\"reveal-left\" style=\"display:flex; flex-direction:column; gap:16px;\">\n"
+        f"          <div style=\"flex:1; border-radius:12px; overflow:hidden; min-height:220px;\">\n"
+        f"            <img src=\"images/{ctx['about_img']}\" alt=\"{ctx['company_name']}\" style=\"width:100%; height:100%; object-fit:cover; display:block; min-height:220px;\">\n"
+        "          </div>\n"
+        f"          <div style=\"flex:1; border-radius:12px; overflow:hidden; min-height:220px;\">\n"
+        f"            <img src=\"images/{ctx['coverage_img']}\" alt=\"{ctx['company_name']}\" style=\"width:100%; height:100%; object-fit:cover; display:block; min-height:220px;\">\n"
+        "          </div>\n"
+        "        </div>\n"
+        "        <div class=\"reveal-right\" style=\"display:flex; flex-direction:column; justify-content:center;\">\n"
+        "          <span class=\"section-label\">About Us</span>\n"
+        f"          <h2 class=\"section-heading\" style=\"margin-bottom:16px;\">{ctx['about_title']}</h2>\n"
+        f"          <p style=\"font-size:1rem; color:#64748B; line-height:1.72; margin-bottom:28px;\">{ctx['about_desc']}</p>\n"
+        f"          <ul class=\"check-list\" style=\"margin-bottom:32px;\">{_checklist_html(ctx['about_checklist'])}</ul>\n"
+        "          <a href=\"#careers\" class=\"btn btn-outline-dark\">Join Our Team</a>\n"
+        "        </div>\n"
+        "      </div>\n"
+        "    </div>\n"
+        "  </section>\n"
+    )
+
+
+def _about_v5(ctx: dict) -> str:
+    """Terminal/CLI-styled about block: monospace green-on-dark text simulation."""
     p = ctx["primary"]; pl = ctx["primary_light"]
     navy = ctx["navy"]; fh = ctx["font_heading"]
     company = ctx["company_name"]; short = ctx["company_short"]
+    _is_regional = "regional" in ctx.get("routes_type", "OTR Routes").lower()
+    coverage_line = "regional" if _is_regional else "nationwide (48 states)"
+    lines = [
+        (f"$ carrier --query {short.lower().replace(' ','_')}", "rgba(255,255,255,0.35)"),
+        ("", ""),
+        (f"  name         : {company}", "#A3E635"),
+        (f"  base         : {ctx['city_state']}", "#A3E635"),
+        (f"  coverage     : {coverage_line}", "#A3E635"),
+        (f"  freight_type : {ctx['routes_type']}", "#A3E635"),
+        (f"  home_time    : {ctx['home_time']}", "#A3E635"),
+        ("  dispatch     : 24/7 available", "#A3E635"),
+        ("  drivers      : CDL-A, vetted &amp; professional", "#A3E635"),
+        ("  no_touch     : true", "#A3E635"),
+        ("", ""),
+        ("$ status", "rgba(255,255,255,0.35)"),
+        ("  \u25cf ACCEPTING APPLICATIONS", "#22C55E"),
+    ]
+    term_html = "".join(
+        f"<div style=\"line-height:1.8; font-family:'Courier New',monospace; font-size:0.88rem; color:{color};\">{text}</div>\n"
+        for text, color in lines
+    )
     return (
-        f"  <section class=\"section\" style=\"background:{navy};\" id=\"careers\">\n"
+        "  <section class=\"section\" id=\"about\" style=\"background:#0D1117;\">\n"
         "    <div class=\"container\">\n"
-        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:48px;\">\n"
-        "        <span class=\"section-label\">Now Hiring</span>\n"
-        f"        <h2 class=\"section-heading section-heading-light\">Drive With {short}</h2>\n"
-        "        <p class=\"section-desc\" style=\"color:rgba(255,255,255,0.5); margin:0 auto;\">Competitive pay, real home time, and a carrier that backs you up. Here's what we're offering.</p>\n"
+        "      <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:72px; align-items:center;\">\n"
+        "        <div class=\"reveal-left\">\n"
+        f"          <div style=\"border-radius:12px; overflow:hidden; background:#161B22; border:1px solid rgba(255,255,255,0.07); padding:28px 32px; font-family:'Courier New',monospace;\">\n"
+        "            <div style=\"display:flex; gap:8px; margin-bottom:20px;\">\n"
+        "              <span style=\"width:12px; height:12px; border-radius:50%; background:#FF5F56; display:inline-block;\"></span>\n"
+        "              <span style=\"width:12px; height:12px; border-radius:50%; background:#FFBD2E; display:inline-block;\"></span>\n"
+        "              <span style=\"width:12px; height:12px; border-radius:50%; background:#27C93F; display:inline-block;\"></span>\n"
+        "            </div>\n"
+        + term_html
+        + "          </div>\n"
+        "        </div>\n"
+        "        <div class=\"reveal-right\">\n"
+        "          <span class=\"section-label\" style=\"color:#A3E635;\">About Us</span>\n"
+        f"          <h2 style=\"font-family:'{fh}',sans-serif; font-size:clamp(1.8rem,3vw,2.6rem);"
+        " font-weight:900; color:#fff; line-height:1.1; margin-bottom:16px;\">"
+        f"{ctx['about_title']}</h2>\n"
+        f"          <p style=\"font-size:0.97rem; color:rgba(255,255,255,0.55); line-height:1.75; margin-bottom:28px;\">{ctx['about_desc']}</p>\n"
+        f"          <ul class=\"check-list\" style=\"color:rgba(255,255,255,0.8); margin-bottom:32px;\">{_checklist_html(ctx['about_checklist'][:3])}</ul>\n"
+        "          <a href=\"#careers\" class=\"btn btn-primary\">Join Our Team</a>\n"
+        "        </div>\n"
         "      </div>\n"
-        "      <div class=\"reveal\" style=\"text-align:center; margin-bottom:48px;\">\n"
-        f"        <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.5rem; font-weight:700; color:#fff; margin-bottom:6px;\">{ctx['job_title']}</h3>\n"
-        f"        <div style=\"font-family:'{fh}',sans-serif; font-size:1.8rem; font-weight:900; color:{pl};\">{ctx['pay_range']}</div>\n"
+        "    </div>\n"
+        "  </section>\n"
+    )
+
+
+# ── CAREERS VARIANTS ──────────────────────────────────────────────────
+
+def _careers_v1(ctx: dict) -> str:
+    """Oversized pay banner + icon-grid perks: big pay strip then emoji-icon perk cards."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
+    company = ctx["company_name"]
+    pay_val = ctx["pay_range"].split("/")[0].strip()
+    perk_icons = ["\U0001f4b5", "\U0001f3e0", "\U0001f6e3\ufe0f", "\u2705", "\U0001f4c5", "\U0001f3e5"]
+    perk_list = ctx["perks"]
+    perk_cards = "".join(
+        f"<div class=\"reveal delay-{i}\" style=\"background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);"
+        " border-radius:10px; padding:22px 18px; text-align:center;\">"
+        f"<div style=\"font-size:1.8rem; margin-bottom:10px;\">{perk_icons[i % len(perk_icons)]}</div>"
+        f"<div style=\"font-size:0.88rem; color:rgba(255,255,255,0.72); line-height:1.45; font-weight:500;\">{perk}</div>"
+        "</div>"
+        for i, perk in enumerate(perk_list[:6])
+    )
+    return (
+        f"  <section id=\"careers\" style=\"background:{navy};\">\n"
+        "    <!-- Oversized pay banner -->\n"
+        f"    <div style=\"background:{p}; padding:48px 24px; text-align:center; border-bottom:4px solid rgba(255,255,255,0.1);\">\n"
+        "      <div class=\"reveal\">\n"
+        f"        <div style=\"font-family:'{fh}',sans-serif; font-size:0.72rem; font-weight:700; letter-spacing:3px;"
+        " text-transform:uppercase; color:rgba(255,255,255,0.65); margin-bottom:8px;\">CDL-A &middot; Now Hiring</div>\n"
+        f"        <div style=\"font-family:'{fh}',sans-serif; font-size:clamp(3rem,7vw,6rem);"
+        f" font-weight:900; color:#fff; line-height:0.95; letter-spacing:-3px; margin-bottom:6px;\">{pay_val}</div>\n"
+        f"        <div style=\"font-family:'{fh}',sans-serif; font-size:1.1rem; font-weight:600; color:rgba(255,255,255,0.7);\">{ctx['job_title']} &middot; {ctx['routes_type']}</div>\n"
         "      </div>\n"
-        "      <div class=\"reveal\" style=\"display:grid; grid-template-columns:repeat(4,1fr); gap:16px; max-width:960px; margin:0 auto 48px;\">\n"
+        "    </div>\n"
+        "    <!-- Stats row -->\n"
+        f"    <div style=\"background:{navy}; padding:32px 24px; border-bottom:1px solid rgba(255,255,255,0.06);\">\n"
+        "      <div style=\"max-width:960px; margin:0 auto; display:grid; grid-template-columns:repeat(4,1fr); gap:16px;\">\n"
         + _stat_cards_dark(ctx)
         + "\n      </div>\n"
-        "      <div class=\"reveal\" style=\"display:grid; grid-template-columns:1fr 1fr; gap:12px 40px; max-width:700px; margin:0 auto 40px; color:rgba(255,255,255,0.75);\">\n"
-        f"        {ctx['perks_html']}\n"
+        "    </div>\n"
+        "    <!-- Perk icon grid -->\n"
+        "    <div style=\"padding:64px 24px;\">\n"
+        "      <div style=\"max-width:1000px; margin:0 auto;\">\n"
+        f"        <h3 class=\"reveal\" style=\"font-family:'{fh}',sans-serif; font-size:1.1rem; font-weight:800; color:#fff; text-align:center; margin-bottom:32px; text-transform:uppercase; letter-spacing:1.5px;\">What You Get</h3>\n"
+        "        <div style=\"display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:40px;\">\n"
+        + perk_cards
+        + "        </div>\n"
+        "        <div style=\"text-align:center;\">\n"
+        f"          <a href=\"mailto:{ctx['email']}\" class=\"btn btn-primary\" style=\"padding:15px 44px; font-size:1rem;\">Apply Now &mdash; {ctx['job_title']}</a>\n"
+        "        </div>\n"
+        f"        <p class=\"eeo-text\">{company} is an Equal Opportunity Employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, national origin, age, disability, or veteran status.</p>\n"
         "      </div>\n"
-        "      <div class=\"reveal\" style=\"text-align:center;\">\n"
-        f"        <a href=\"mailto:{ctx['email']}\" class=\"btn btn-primary\" style=\"font-size:1rem; padding:16px 44px;\">Apply Now &mdash; {ctx['job_title']}</a>\n"
-        "      </div>\n"
-        f"      <p class=\"eeo-text\">{company} is an Equal Opportunity Employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, national origin, age, disability, or veteran status.</p>\n"
         "    </div>\n"
         "  </section>\n"
     )
 
 
 def _careers_v2(ctx: dict) -> str:
-    """Light bg, job title bar with pay badge, colored-border boxes, perks 2-col."""
-    p = ctx["primary"]; ab = ctx["accent_bg"]; abl = ctx["accent_bg_light"]
-    navy = ctx["navy"]; g50 = ctx["gray_50"]; fh = ctx["font_heading"]
+    """Alternating color rows: job title / requirements / benefits / apply — each a distinct bg."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
+    ab = ctx["accent_bg"]; abl = ctx["accent_bg_light"]
     company = ctx["company_name"]
     return (
-        f"  <section class=\"section\" style=\"background:{g50};\" id=\"careers\">\n"
-        "    <div class=\"container\">\n"
-        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:48px;\">\n"
-        "        <span class=\"section-label\">Open Positions</span>\n"
-        "        <h2 class=\"section-heading\">We're Hiring CDL-A Drivers</h2>\n"
+        "  <section id=\"careers\">\n"
+        "    <!-- Row 1: Job title -->\n"
+        f"    <div style=\"background:{navy}; padding:64px 24px; text-align:center;\">\n"
+        "      <div class=\"reveal\">\n"
+        f"        <span style=\"font-family:'{fh}',sans-serif; font-size:0.72rem; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:{pl}; display:block; margin-bottom:10px;\">Now Hiring</span>\n"
+        f"        <h2 style=\"font-family:'{fh}',sans-serif; font-size:clamp(2rem,4vw,3rem); font-weight:900; color:#fff; letter-spacing:-0.5px; margin-bottom:8px;\">{ctx['job_title']}</h2>\n"
+        f"        <div style=\"font-family:'{fh}',sans-serif; font-size:1.5rem; font-weight:900; color:{pl};\">{ctx['pay_range']}</div>\n"
         "      </div>\n"
-        "      <div class=\"reveal\" style=\"background:#fff; border-radius:12px; border:1px solid #E2E8F0;"
-        " padding:28px 36px; display:flex; align-items:center; justify-content:space-between;"
-        " flex-wrap:wrap; gap:16px; margin-bottom:32px; box-shadow:0 4px 16px rgba(0,0,0,0.04);\">\n"
-        "        <div>\n"
-        f"          <div style=\"font-family:'{fh}',sans-serif; font-size:1.3rem; font-weight:800; color:{navy};\">{ctx['job_title']}</div>\n"
-        f"          <div style=\"font-size:0.88rem; color:#64748B; margin-top:4px;\">Full-Time &middot; {ctx['routes_type'].split()[0]} &middot; {ctx['routes']} &middot; {ctx['city_state']}</div>\n"
-        "        </div>\n"
-        f"        <div style=\"background:{ab}; color:{p}; font-family:'{fh}',sans-serif; font-size:1.25rem; font-weight:900;"
-        f" padding:10px 24px; border-radius:8px; border:2px solid {p};\">{ctx['pay_range']}</div>\n"
-        "      </div>\n"
-        "      <div class=\"reveal\" style=\"display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:36px;\">\n"
+        "    </div>\n"
+        "    <!-- Row 2: Quick stats -->\n"
+        f"    <div style=\"background:{p}; padding:36px 24px;\">\n"
+        "      <div style=\"max-width:900px; margin:0 auto; display:grid; grid-template-columns:repeat(4,1fr); gap:20px; text-align:center;\">\n"
         + "".join(
-            f"        <div style=\"background:#fff; border:2px solid {p}; border-radius:10px; padding:22px 16px; text-align:center;\">"
-            f"<div style=\"font-family:'{fh}',sans-serif; font-size:1.25rem; font-weight:900; color:{p}; margin-bottom:4px;\">{val}</div>"
-            f"<div style=\"font-size:0.78rem; color:#64748B; text-transform:uppercase; letter-spacing:1px;\">{lbl}</div></div>\n"
+            f"<div><div style=\"font-family:'{fh}',sans-serif; font-size:1.3rem; font-weight:900; color:#fff;\">{val}</div>"
+            f"<div style=\"font-size:0.72rem; color:rgba(255,255,255,0.6); text-transform:uppercase; letter-spacing:1px; margin-top:4px;\">{lbl}</div></div>"
             for val, lbl in [
                 (ctx["pay_range"].split("/")[0].strip(), "Weekly Pay"),
                 (ctx["home_time_short"], ctx["home_time_detail"]),
@@ -2739,88 +1785,24 @@ def _careers_v2(ctx: dict) -> str:
                 (ctx["fourth_card_value"], ctx["fourth_card_label"]),
             ]
         )
-        + "      </div>\n"
-        "      <div class=\"reveal\" style=\"background:#fff; border:1px solid #E2E8F0; border-radius:12px; padding:32px 36px; margin-bottom:28px;\">\n"
-        f"        <h3 style=\"font-family:'{fh}',sans-serif; font-size:1rem; font-weight:800; color:{navy}; margin-bottom:18px; text-transform:uppercase; letter-spacing:1px;\">Benefits &amp; Perks</h3>\n"
-        "        <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:10px 40px; color:#334155;\">\n"
+        + "\n      </div>\n"
+        "    </div>\n"
+        "    <!-- Row 3: Benefits -->\n"
+        f"    <div style=\"background:{abl}; padding:64px 24px;\">\n"
+        "      <div style=\"max-width:860px; margin:0 auto;\">\n"
+        "        <div class=\"reveal\" style=\"text-align:center; margin-bottom:32px;\">\n"
+        f"          <span style=\"font-family:'{fh}',sans-serif; font-size:0.72rem; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:{p};\">Benefits &amp; Perks</span>\n"
+        "        </div>\n"
+        "        <div class=\"reveal\" style=\"display:grid; grid-template-columns:1fr 1fr; gap:12px 48px; color:#334155;\">\n"
         f"          {ctx['perks_html']}\n"
         "        </div>\n"
         "      </div>\n"
-        "      <div class=\"reveal\" style=\"text-align:center;\">\n"
-        f"        <a href=\"mailto:{ctx['email']}\" class=\"btn btn-primary\" style=\"padding:15px 44px;\">Apply for This Position</a>\n"
-        "      </div>\n"
-        f"      <p class=\"eeo-text-dark\">{company} is an Equal Opportunity Employer.</p>\n"
         "    </div>\n"
-        "  </section>\n"
-    )
-
-
-def _careers_v3(ctx: dict) -> str:
-    """Two-column: dark left with job info+stats, light right with perks."""
-    p = ctx["primary"]; pl = ctx["primary_light"]
-    navy = ctx["navy"]; fh = ctx["font_heading"]
-    company = ctx["company_name"]; short = ctx["company_short"]
-    stat_items = [
-        (ctx["pay_range"].split("/")[0].strip(), "Weekly Pay"),
-        (ctx["home_time_short"], ctx["home_time_detail"]),
-        (ctx["routes"], ctx["routes_type"]),
-        (ctx["fourth_card_value"], ctx["fourth_card_label"]),
-    ]
-    stat_html = "".join(
-        f"<div style=\"background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:18px;\">"
-        f"<div style=\"font-family:'{fh}',sans-serif; font-size:1.15rem; font-weight:900; color:{pl}; margin-bottom:4px;\">{val}</div>"
-        f"<div style=\"font-size:0.78rem; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:1px;\">{lbl}</div></div>"
-        for val, lbl in stat_items
-    )
-    return (
-        f"  <section id=\"careers\" style=\"display:grid; grid-template-columns:1fr 1fr; min-height:600px;\">\n"
-        f"    <div style=\"background:{navy}; padding:80px 56px; display:flex; align-items:flex-start; flex-direction:column; justify-content:center;\">\n"
-        "      <div class=\"reveal-left\">\n"
-        f"        <span style=\"font-family:'{fh}',sans-serif; font-size:0.72rem; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:{pl}; display:block; margin-bottom:10px;\">Now Hiring</span>\n"
-        f"        <h2 style=\"font-family:'{fh}',sans-serif; font-size:clamp(1.8rem,3vw,2.6rem); font-weight:900; color:#fff; margin-bottom:8px; letter-spacing:-0.5px;\">{ctx['job_title']}</h2>\n"
-        f"        <div style=\"font-family:'{fh}',sans-serif; font-size:1.5rem; font-weight:800; color:{pl}; margin-bottom:32px;\">{ctx['pay_range']}</div>\n"
-        f"        <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:36px;\">{stat_html}</div>\n"
-        f"        <a href=\"mailto:{ctx['email']}\" class=\"btn btn-primary\">Apply Now</a>\n"
-        "      </div>\n"
-        "    </div>\n"
-        "    <div style=\"background:#F8FAFC; padding:80px 56px; display:flex; align-items:flex-start; flex-direction:column; justify-content:center;\">\n"
-        "      <div class=\"reveal-right\" style=\"width:100%;\">\n"
-        f"        <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.3rem; font-weight:800; color:{navy}; margin-bottom:24px;\">What We Offer</h3>\n"
-        "        <div style=\"display:flex; flex-direction:column; gap:12px; color:#334155;\">\n"
-        f"          {ctx['perks_html']}\n"
-        "        </div>\n"
-        f"        <p style=\"font-size:0.77rem; color:#94A3B8; margin-top:32px; line-height:1.65;\">{company} is an Equal Opportunity Employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, national origin, age, disability, or veteran status.</p>\n"
-        "      </div>\n"
-        "    </div>\n"
-        "  </section>\n"
-    )
-
-
-def _careers_v4(ctx: dict) -> str:
-    """Accent banner with job title+pay, white section below with stat cards+perks."""
-    p = ctx["primary"]; pl = ctx["primary_light"]
-    navy = ctx["navy"]; fh = ctx["font_heading"]
-    company = ctx["company_name"]
-    return (
-        "  <section id=\"careers\">\n"
-        f"    <div style=\"background:{p}; padding:64px 24px; text-align:center;\">\n"
+        "    <!-- Row 4: Apply -->\n"
+        "    <div style=\"background:#fff; padding:56px 24px; text-align:center;\">\n"
         "      <div class=\"reveal\">\n"
-        f"        <span style=\"font-family:'{fh}',sans-serif; font-size:0.72rem; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:rgba(255,255,255,0.65); display:block; margin-bottom:12px;\">Now Hiring</span>\n"
-        f"        <h2 style=\"font-family:'{fh}',sans-serif; font-size:clamp(2rem,4vw,3rem); font-weight:900; color:#fff; margin-bottom:10px; letter-spacing:-0.5px;\">{ctx['job_title']}</h2>\n"
-        f"        <div style=\"font-family:'{fh}',sans-serif; font-size:1.6rem; font-weight:900; color:rgba(255,255,255,0.85);\">{ctx['pay_range']}</div>\n"
-        "      </div>\n"
-        "    </div>\n"
-        "    <div style=\"background:#fff; padding:72px 24px;\">\n"
-        "      <div style=\"max-width:1100px; margin:0 auto;\">\n"
-        "        <div class=\"reveal\" style=\"display:grid; grid-template-columns:repeat(4,1fr); gap:20px; margin-bottom:52px;\">\n"
-        + _stat_cards_light(ctx)
-        + "\n        </div>\n"
-        "        <div class=\"reveal\" style=\"display:grid; grid-template-columns:1fr 1fr; gap:12px 48px; max-width:720px; margin:0 auto 40px; color:#334155;\">\n"
-        f"          {ctx['perks_html']}\n"
-        "        </div>\n"
-        "        <div class=\"reveal\" style=\"text-align:center;\">\n"
-        f"          <a href=\"mailto:{ctx['email']}\" class=\"btn btn-primary\" style=\"padding:15px 44px;\">Apply for This Position</a>\n"
-        "        </div>\n"
+        f"        <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.4rem; font-weight:800; color:{navy}; margin-bottom:16px;\">Ready to Get Behind the Wheel?</h3>\n"
+        f"        <a href=\"mailto:{ctx['email']}\" class=\"btn btn-primary\" style=\"padding:15px 44px; font-size:1rem;\">Apply Today</a>\n"
         f"        <p class=\"eeo-text-dark\">{company} is an Equal Opportunity Employer.</p>\n"
         "      </div>\n"
         "    </div>\n"
@@ -2828,9 +1810,55 @@ def _careers_v4(ctx: dict) -> str:
     )
 
 
-def _careers_v5(ctx: dict) -> str:
-    """Centered card with shadow: job title, pay, stat row, divider, perks 2-col, CTA."""
-    p = ctx["primary"]; navy = ctx["navy"]; g50 = ctx["gray_50"]; fh = ctx["font_heading"]
+def _careers_v3(ctx: dict) -> str:
+    """Question-style applicant checklist: 'Do you have CDL-A? ✓' + Apply CTA."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; g50 = ctx["gray_50"]; fh = ctx["font_heading"]
+    ab = ctx["accent_bg"]; abl = ctx["accent_bg_light"]
+    company = ctx["company_name"]
+    questions = [
+        ("Do you hold a valid CDL-A license?", True),
+        (f"Do you have {ctx['min_experience']} of verifiable experience?", True),
+        ("Do you want consistent, no-touch dry van freight?", True),
+        (f"Are you looking for {ctx['home_time']}?", True),
+        (f"Do you want {ctx['pay_range']} weekly?", True),
+        ("Are you ready to work with a carrier that actually communicates?", True),
+    ]
+    q_html = "".join(
+        f"<div class=\"reveal delay-{i}\" style=\"display:flex; align-items:center; gap:16px; padding:18px 24px;"
+        " background:#fff; border:1px solid #E2E8F0; border-radius:10px;\">"
+        f"<span style=\"width:28px; height:28px; border-radius:50%; background:{'#DCFCE7' if chk else '#FEE2E2'};"
+        f" color:{'#16A34A' if chk else '#DC2626'}; display:flex; align-items:center; justify-content:center;"
+        f" font-size:0.9rem; font-weight:900; flex-shrink:0;\">{'&#10003;' if chk else '&#10007;'}</span>"
+        f"<span style=\"font-size:0.94rem; color:#334155; font-weight:500;\">{q}</span>"
+        "</div>"
+        for i, (q, chk) in enumerate(questions, 1)
+    )
+    return (
+        f"  <section class=\"section\" style=\"background:{abl};\" id=\"careers\">\n"
+        "    <div class=\"container\">\n"
+        "      <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:72px; align-items:center;\">\n"
+        "        <div class=\"reveal-left\">\n"
+        "          <span class=\"section-label\">Is This You?</span>\n"
+        f"          <h2 class=\"section-heading\" style=\"margin-bottom:16px;\">{ctx['job_title']}</h2>\n"
+        f"          <div style=\"font-family:'{fh}',sans-serif; font-size:1.5rem; font-weight:900; color:{p}; margin-bottom:20px;\">{ctx['pay_range']}</div>\n"
+        f"          <p style=\"font-size:0.97rem; color:#64748B; line-height:1.72; margin-bottom:28px;\">If you answered yes to all of the below, we want to hear from you today. No gimmicks &mdash; just real freight and fair pay.</p>\n"
+        f"          <a href=\"mailto:{ctx['email']}\" class=\"btn btn-primary\">Apply Now</a>\n"
+        f"          <p class=\"eeo-text-dark\" style=\"max-width:400px;\">{company} is an Equal Opportunity Employer.</p>\n"
+        "        </div>\n"
+        "        <div style=\"display:flex; flex-direction:column; gap:12px;\">\n"
+        + q_html
+        + "        </div>\n"
+        "      </div>\n"
+        "    </div>\n"
+        "  </section>\n"
+    )
+
+
+def _careers_v4(ctx: dict) -> str:
+    """Split with quick-apply form: left job details, right 3-field inline apply form."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
     company = ctx["company_name"]
     stat_items = [
         (ctx["pay_range"].split("/")[0].strip(), "Weekly Pay"),
@@ -2838,85 +1866,123 @@ def _careers_v5(ctx: dict) -> str:
         (ctx["routes"], ctx["routes_type"]),
         (ctx["fourth_card_value"], ctx["fourth_card_label"]),
     ]
-    stats_html = "".join(
-        f"<div style=\"text-align:center;\">"
-        f"<div style=\"font-family:'{fh}',sans-serif; font-size:1.25rem; font-weight:900; color:{navy};\">{val}</div>"
-        f"<div style=\"font-size:0.78rem; color:#94A3B8; text-transform:uppercase; letter-spacing:1px; margin-top:4px;\">{lbl}</div></div>"
-        + ("<div style=\"width:1px; background:#E2E8F0;\"></div>" if i < len(stat_items) - 1 else "")
-        for i, (val, lbl) in enumerate(stat_items)
+    stat_html = "".join(
+        f"<div style=\"text-align:center; padding:16px; background:rgba(255,255,255,0.06);"
+        " border:1px solid rgba(255,255,255,0.08); border-radius:8px;\">"
+        f"<div style=\"font-family:'{fh}',sans-serif; font-size:1.2rem; font-weight:900; color:{pl}; margin-bottom:4px;\">{val}</div>"
+        f"<div style=\"font-size:0.72rem; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:1px;\">{lbl}</div>"
+        "</div>"
+        for val, lbl in stat_items
     )
     return (
-        f"  <section class=\"section\" style=\"background:{g50};\" id=\"careers\">\n"
-        "    <div class=\"container\">\n"
-        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:52px;\">\n"
-        "        <span class=\"section-label\">Careers</span>\n"
-        "        <h2 class=\"section-heading\">Join Our Growing Team</h2>\n"
-        "        <p class=\"section-desc\" style=\"margin:0 auto;\">We're looking for experienced CDL-A drivers who want steady work, honest pay, and a carrier that has their back.</p>\n"
+        f"  <section id=\"careers\" style=\"display:grid; grid-template-columns:1fr 1fr; min-height:640px;\">\n"
+        f"    <div style=\"background:{navy}; padding:80px 56px; display:flex; flex-direction:column; justify-content:center;\">\n"
+        "      <div class=\"reveal-left\">\n"
+        f"        <span style=\"font-family:'{fh}',sans-serif; font-size:0.72rem; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:{pl}; display:block; margin-bottom:10px;\">Now Hiring</span>\n"
+        f"        <h2 style=\"font-family:'{fh}',sans-serif; font-size:clamp(1.8rem,3vw,2.6rem); font-weight:900; color:#fff; letter-spacing:-0.5px; margin-bottom:8px;\">{ctx['job_title']}</h2>\n"
+        f"        <div style=\"font-family:'{fh}',sans-serif; font-size:1.4rem; font-weight:900; color:{pl}; margin-bottom:28px;\">{ctx['pay_range']}</div>\n"
+        f"        <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:28px;\">{stat_html}</div>\n"
+        "        <div style=\"color:rgba(255,255,255,0.65); font-size:0.9rem; line-height:1.7;\">\n"
+        f"          {ctx['perks_html']}\n"
+        "        </div>\n"
         "      </div>\n"
-        f"      <div class=\"reveal\" style=\"background:#fff; border-radius:16px; box-shadow:0 12px 56px rgba(0,0,0,0.09);"
-        f" max-width:900px; margin:0 auto; overflow:hidden; border-top:4px solid {p};\">\n"
-        "        <div style=\"padding:40px 48px; border-bottom:1px solid #E2E8F0; text-align:center;\">\n"
-        f"          <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.5rem; font-weight:800; color:{navy}; margin-bottom:8px;\">{ctx['job_title']}</h3>\n"
-        f"          <div style=\"font-family:'{fh}',sans-serif; font-size:1.8rem; font-weight:900; color:{p};\">{ctx['pay_range']}</div>\n"
-        "        </div>\n"
-        "        <div style=\"padding:32px 48px; border-bottom:1px solid #E2E8F0; display:flex; justify-content:space-around; gap:20px; flex-wrap:wrap; text-align:center;\">\n"
-        f"          {stats_html}\n"
-        "        </div>\n"
-        "        <div style=\"padding:32px 48px; border-bottom:1px solid #E2E8F0;\">\n"
-        f"          <h4 style=\"font-family:'{fh}',sans-serif; font-size:0.88rem; font-weight:800; color:{navy}; margin-bottom:18px; text-transform:uppercase; letter-spacing:1px;\">Benefits &amp; Perks</h4>\n"
-        "          <div style=\"display:grid; grid-template-columns:1fr 1fr; gap:10px 40px; color:#334155;\">\n"
-        f"            {ctx['perks_html']}\n"
-        "          </div>\n"
-        "        </div>\n"
-        "        <div style=\"padding:28px 48px; text-align:center;\">\n"
-        f"          <a href=\"mailto:{ctx['email']}\" class=\"btn btn-primary\" style=\"padding:14px 44px;\">Apply Now</a>\n"
-        f"          <p style=\"font-size:0.77rem; color:#94A3B8; margin-top:16px;\">{company} is an Equal Opportunity Employer.</p>\n"
-        "        </div>\n"
+        "    </div>\n"
+        "    <div style=\"background:#F8FAFC; padding:80px 56px; display:flex; flex-direction:column; justify-content:center;\">\n"
+        "      <div class=\"reveal-right\">\n"
+        f"        <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.4rem; font-weight:800; color:{navy}; margin-bottom:8px;\">Quick Apply</h3>\n"
+        "        <p style=\"font-size:0.92rem; color:#64748B; margin-bottom:24px;\">Takes less than 2 minutes. We'll reach out within 24 hours.</p>\n"
+        "        <form data-blk-form=\"1\">\n"
+        "          <div class=\"field\"><label>Full Name</label><input type=\"text\" placeholder=\"Your full name\" required></div>\n"
+        "          <div class=\"field\"><label>Phone Number</label><input type=\"tel\" placeholder=\"(555) 000-0000\" required></div>\n"
+        "          <div class=\"field\"><label>Email Address</label><input type=\"email\" placeholder=\"you@email.com\" required></div>\n"
+        "          <div class=\"field\"><label>Years of CDL-A Experience</label><select><option value=\"\">Select...</option><option>1 year</option><option>2 years</option><option>3-5 years</option><option>5+ years</option></select></div>\n"
+        f"          <button type=\"submit\" class=\"btn btn-primary\" style=\"width:100%; padding:14px; font-size:1rem;\">Submit Application</button>\n"
+        "        </form>\n"
+        f"        <p style=\"font-size:0.77rem; color:#94A3B8; margin-top:16px;\">{company} is an Equal Opportunity Employer.</p>\n"
         "      </div>\n"
         "    </div>\n"
         "  </section>\n"
     )
 
 
-# ── CONTACT VARIANTS ──────────────────────────────────────────────────────────
-
-def _contact_v1(ctx: dict) -> str:
-    """Split: dark left with contact info, light right with form."""
+def _careers_v5(ctx: dict) -> str:
+    """9-cell job details grid: pay, home time, routes, exp, freight, equipment, bonus, orientation, benefits."""
     p = ctx["primary"]; pl = ctx["primary_light"]
-    navy = ctx["navy"]; fh = ctx["font_heading"]
-    _addr = f"{ctx['address']}<br>{ctx['city_state']}" if ctx["address"] else ctx["city_state"]
-    contact_rows = "".join(
-        f"        <div style=\"display:flex; gap:16px; align-items:flex-start; margin-bottom:24px;\">\n"
-        f"          <div style=\"width:42px; height:42px; border-radius:8px; background:rgba(255,255,255,0.07);"
-        " display:flex; align-items:center; justify-content:center; font-size:1.1rem; flex-shrink:0;\">"
-        f"{icon}</div>\n"
-        f"          <div><div style=\"font-family:'{fh}',sans-serif; font-size:0.85rem; font-weight:700; color:#fff; margin-bottom:3px;\">{label}</div>"
-        f"<div style=\"font-size:0.9rem; color:rgba(255,255,255,0.5);\">{value}</div></div>\n"
-        "        </div>\n"
-        for icon, label, value in [
-            ("\u2709\ufe0f", "Email", ctx["email"]),
-            ("\U0001f4cd", "Address", _addr),
-            ("\U0001f550", "Hours", "Dispatch available 24/7"),
-        ]
+    navy = ctx["navy"]; g50 = ctx["gray_50"]; fh = ctx["font_heading"]
+    ab = ctx["accent_bg"]; abl = ctx["accent_bg_light"]
+    company = ctx["company_name"]
+    pr = _hex_to_rgb(p)
+    cells = [
+        ("\U0001f4b5", "Weekly Pay", ctx["pay_range"]),
+        ("\U0001f3e0", "Home Time", ctx["home_time"]),
+        ("\U0001f6e3\ufe0f", "Routes", ctx["routes"]),
+        ("\U0001f4cb", "Min. Experience", ctx["min_experience"]),
+        ("\U0001f4e6", "Freight Type", "No-Touch Dry Van"),
+        ("\U0001f69a", "Equipment", "Late-Model Trucks"),
+        (ctx["fourth_card_value"], ctx["fourth_card_label"], "Driver Bonus"),
+        ("\U0001f4c5", "Orientation", "Paid Orientation"),
+        ("\U0001f3e5", "Benefits", "Health &amp; Dental"),
+    ]
+    cell_html = "".join(
+        f"<div class=\"reveal\" style=\"background:#fff; border:1px solid #E2E8F0; border-radius:10px;"
+        f" padding:24px 20px; text-align:center; transition:border-color 0.3s,transform 0.3s;\""
+        f" onmouseover=\"this.style.borderColor='{p}';this.style.transform='translateY(-3px)'\""
+        " onmouseout=\"this.style.borderColor='#E2E8F0';this.style.transform=''\">"
+        f"<div style=\"font-size:1.6rem; margin-bottom:8px;\">{icon}</div>"
+        f"<div style=\"font-size:0.7rem; color:#94A3B8; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;\">{label}</div>"
+        f"<div style=\"font-family:'{fh}',sans-serif; font-size:0.95rem; font-weight:800; color:{navy};\">{value}</div>"
+        "</div>"
+        for icon, label, value in cells
     )
     return (
-        "  <section id=\"contact\" style=\"display:grid; grid-template-columns:1fr 1.1fr;\">\n"
-        f"    <div style=\"background:{navy}; padding:80px 56px; display:flex; flex-direction:column; justify-content:center;\">\n"
-        "      <div class=\"reveal-left\">\n"
-        f"        <span style=\"font-family:'{fh}',sans-serif; font-size:0.72rem; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:{pl}; display:block; margin-bottom:12px;\">Get In Touch</span>\n"
-        f"        <h2 style=\"font-family:'{fh}',sans-serif; font-size:clamp(1.8rem,3vw,2.4rem); font-weight:900; color:#fff; margin-bottom:36px;\">Let's Talk Freight</h2>\n"
-        + contact_rows
+        f"  <section class=\"section\" style=\"background:{abl};\" id=\"careers\">\n"
+        "    <div class=\"container\">\n"
+        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:48px;\">\n"
+        "        <span class=\"section-label\">Now Hiring</span>\n"
+        f"        <h2 class=\"section-heading\">{ctx['job_title']}</h2>\n"
+        f"        <div style=\"font-family:'{fh}',sans-serif; font-size:1.6rem; font-weight:900; color:{p}; margin-top:8px;\">{ctx['pay_range']}</div>\n"
+        "      </div>\n"
+        "      <div style=\"display:grid; grid-template-columns:repeat(3,1fr); gap:16px; max-width:860px; margin:0 auto 40px;\">\n"
+        + cell_html
         + "      </div>\n"
+        "      <div class=\"reveal\" style=\"text-align:center;\">\n"
+        f"        <a href=\"mailto:{ctx['email']}\" class=\"btn btn-primary\" style=\"padding:15px 44px; font-size:1rem;\">Apply for This Position</a>\n"
+        "      </div>\n"
+        f"      <p class=\"eeo-text-dark\">{company} is an Equal Opportunity Employer.</p>\n"
         "    </div>\n"
-        "    <div style=\"background:#F8FAFC; padding:80px 56px; display:flex; flex-direction:column; justify-content:center;\">\n"
-        "      <div class=\"reveal-right\">\n"
-        f"        <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.3rem; font-weight:800; color:{navy}; margin-bottom:24px;\">Send Us a Message</h3>\n"
-        "        <form data-blk-form=\"1\">\n"
-        "          <div class=\"field-row\"><div class=\"field\"><label>Full Name</label><input type=\"text\" placeholder=\"Your name\" required></div><div class=\"field\"><label>Email</label><input type=\"email\" placeholder=\"you@email.com\" required></div></div>\n"
-        "          <div class=\"field\"><label>Subject</label><select><option value=\"\">Select one</option><option>Freight Quote</option><option>Driver Application</option><option>General</option></select></div>\n"
-        "          <div class=\"field\"><label>Message</label><textarea placeholder=\"Tell us what you need...\"></textarea></div>\n"
-        "          <button type=\"submit\" class=\"btn btn-primary\" style=\"width:100%; padding:13px;\">Send Message</button>\n"
-        "        </form>\n"
+        "  </section>\n"
+    )
+
+
+# ── CONTACT VARIANTS ──────────────────────────────────────────────────
+
+def _contact_v1(ctx: dict) -> str:
+    """Minimalist single CTA: 'Ready to move?' + giant button + tiny contact info below."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; fh = ctx["font_heading"]
+    _addr = f"{ctx['address']}, {ctx['city_state']}" if ctx["address"] else ctx["city_state"]
+    return (
+        f"  <section class=\"section\" style=\"background:{navy}; text-align:center;\" id=\"contact\">\n"
+        "    <div class=\"container\" style=\"max-width:720px;\">\n"
+        "      <div class=\"reveal\">\n"
+        "        <span class=\"section-label\">Contact</span>\n"
+        f"        <h2 style=\"font-family:'{fh}',sans-serif; font-size:clamp(2.2rem,5vw,4rem); font-weight:900;"
+        " color:#fff; line-height:1.07; margin-bottom:16px;\">Ready to Move?</h2>\n"
+        "        <p style=\"font-size:1.05rem; color:rgba(255,255,255,0.5); margin-bottom:36px; line-height:1.72;\">"
+        "Whether you have freight to ship or you're ready to drive, we make it easy to get started.</p>\n"
+        "        <div style=\"display:flex; gap:14px; justify-content:center; flex-wrap:wrap; margin-bottom:48px;\">\n"
+        f"          <a href=\"mailto:{ctx['email']}\" class=\"btn btn-primary\" style=\"padding:18px 52px; font-size:1.1rem;\">Get In Touch</a>\n"
+        "          <a href=\"#careers\" class=\"btn btn-outline-light\" style=\"padding:18px 40px; font-size:1.1rem;\">Apply Now</a>\n"
+        "        </div>\n"
+        "        <div style=\"display:flex; justify-content:center; gap:40px; flex-wrap:wrap;"
+        " padding-top:32px; border-top:1px solid rgba(255,255,255,0.08);\">\n"
+        f"          <div style=\"text-align:center;\"><div style=\"font-size:1.2rem; margin-bottom:4px;\">\u2709\ufe0f</div>"
+        f"<div style=\"font-size:0.82rem; color:rgba(255,255,255,0.4);\">{ctx['email']}</div></div>\n"
+        f"          <div style=\"text-align:center;\"><div style=\"font-size:1.2rem; margin-bottom:4px;\">\U0001f4cd</div>"
+        f"<div style=\"font-size:0.82rem; color:rgba(255,255,255,0.4);\">{_addr}</div></div>\n"
+        f"          <div style=\"text-align:center;\"><div style=\"font-size:1.2rem; margin-bottom:4px;\">\U0001f550</div>"
+        "<div style=\"font-size:0.82rem; color:rgba(255,255,255,0.4);\">Dispatch 24/7</div></div>\n"
+        "        </div>\n"
         "      </div>\n"
         "    </div>\n"
         "  </section>\n"
@@ -2924,40 +1990,44 @@ def _contact_v1(ctx: dict) -> str:
 
 
 def _contact_v2(ctx: dict) -> str:
-    """Dark full-width, centered, 3 info cards in a row, form below."""
+    """Full-bleed bg image with centered glass-morphism form panel."""
     p = ctx["primary"]; pl = ctx["primary_light"]
     navy = ctx["navy"]; fh = ctx["font_heading"]
+    nr = _hex_to_rgb(navy)
     _addr = f"{ctx['address']}<br>{ctx['city_state']}" if ctx["address"] else ctx["city_state"]
-    info_cards = "".join(
-        f"<div style=\"background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);"
-        f" border-radius:12px; padding:28px 24px; text-align:center;\">"
-        f"<div style=\"font-size:1.8rem; margin-bottom:12px;\">{icon}</div>"
-        f"<div style=\"font-family:'{fh}',sans-serif; font-size:0.85rem; font-weight:700; color:#fff; margin-bottom:6px;\">{label}</div>"
-        f"<div style=\"font-size:0.88rem; color:rgba(255,255,255,0.45);\">{value}</div></div>"
-        for icon, label, value in [
-            ("\U0001f4cd", "Location", _addr),
-            ("\u2709\ufe0f", "Email", ctx["email"]),
-            ("\U0001f550", "Availability", "Dispatch 24/7"),
-        ]
-    )
     return (
-        f"  <section class=\"section\" style=\"background:{navy};\" id=\"contact\">\n"
-        "    <div class=\"container\">\n"
-        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:52px;\">\n"
-        "        <span class=\"section-label\">Contact</span>\n"
-        "        <h2 class=\"section-heading section-heading-light\">Get in Touch</h2>\n"
-        "        <p class=\"section-desc\" style=\"color:rgba(255,255,255,0.5); margin:0 auto;\">Ready to move freight or apply to drive? We respond fast.</p>\n"
-        "      </div>\n"
-        f"      <div class=\"reveal\" style=\"display:grid; grid-template-columns:repeat(3,1fr); gap:20px; max-width:900px; margin:0 auto 52px;\">{info_cards}</div>\n"
-        "      <div class=\"reveal\" style=\"background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);"
-        " border-radius:14px; padding:40px 48px; max-width:720px; margin:0 auto;\">\n"
-        f"        <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.1rem; font-weight:800; color:#fff; margin-bottom:24px;\">Send a Message</h3>\n"
+        f"  <section id=\"contact\" style=\"position:relative; padding:100px 24px;"
+        f" background:url('images/{ctx['coverage_img']}') center/cover no-repeat;\">\n"
+        f"    <div style=\"position:absolute; inset:0; background:rgba({nr},0.75);\"></div>\n"
+        "    <div style=\"position:relative; z-index:1; max-width:660px; margin:0 auto;\">\n"
+        "      <div class=\"reveal\" style=\"background:rgba(255,255,255,0.08); backdrop-filter:blur(12px);"
+        " -webkit-backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,0.15);"
+        " border-radius:20px; padding:48px;\">\n"
+        "        <div style=\"text-align:center; margin-bottom:32px;\">\n"
+        "          <span class=\"section-label\">Contact Us</span>\n"
+        f"          <h2 style=\"font-family:'{fh}',sans-serif; font-size:clamp(1.6rem,3vw,2.4rem);"
+        " font-weight:900; color:#fff; margin-bottom:8px;\">Let's Talk Freight</h2>\n"
+        "          <p style=\"font-size:0.9rem; color:rgba(255,255,255,0.55);\">Get a quote or send your driver application &mdash; we respond the same day.</p>\n"
+        "        </div>\n"
         "        <form data-blk-form=\"1\">\n"
-        "          <div class=\"field-row\"><div class=\"field\"><label style=\"color:rgba(255,255,255,0.6);\">Name</label><input type=\"text\" placeholder=\"Your name\" style=\"background:rgba(255,255,255,0.06); border-color:rgba(255,255,255,0.1); color:#fff;\"></div>"
-        "<div class=\"field\"><label style=\"color:rgba(255,255,255,0.6);\">Email</label><input type=\"email\" placeholder=\"you@email.com\" style=\"background:rgba(255,255,255,0.06); border-color:rgba(255,255,255,0.1); color:#fff;\"></div></div>\n"
-        "          <div class=\"field\"><label style=\"color:rgba(255,255,255,0.6);\">Message</label><textarea placeholder=\"Tell us what you need...\" style=\"background:rgba(255,255,255,0.06); border-color:rgba(255,255,255,0.1); color:#fff;\"></textarea></div>\n"
-        "          <button type=\"submit\" class=\"btn btn-primary\" style=\"width:100%; padding:13px;\">Send</button>\n"
+        "          <div class=\"field-row\">"
+        "<div class=\"field\"><label style=\"color:rgba(255,255,255,0.7);\">Name</label>"
+        "<input type=\"text\" placeholder=\"Your name\" style=\"background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.18); color:#fff;\" required></div>"
+        "<div class=\"field\"><label style=\"color:rgba(255,255,255,0.7);\">Email</label>"
+        "<input type=\"email\" placeholder=\"you@email.com\" style=\"background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.18); color:#fff;\" required></div>"
+        "          </div>\n"
+        "          <div class=\"field\"><label style=\"color:rgba(255,255,255,0.7);\">Inquiry Type</label>"
+        "<select style=\"background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.18); color:#fff;\">"
+        "<option value=\"\">Select...</option><option>Freight Quote</option><option>Driver Application</option><option>General</option>"
+        "</select></div>\n"
+        "          <div class=\"field\"><label style=\"color:rgba(255,255,255,0.7);\">Message</label>"
+        "<textarea placeholder=\"Tell us what you need...\" style=\"background:rgba(255,255,255,0.08); border-color:rgba(255,255,255,0.18); color:#fff;\"></textarea></div>\n"
+        f"          <button type=\"submit\" class=\"btn btn-primary\" style=\"width:100%; padding:14px; font-size:1rem;\">Send Message</button>\n"
         "        </form>\n"
+        "        <div style=\"display:flex; justify-content:center; gap:28px; margin-top:28px; flex-wrap:wrap;\">\n"
+        f"          <div style=\"font-size:0.8rem; color:rgba(255,255,255,0.45);\">\u2709\ufe0f {ctx['email']}</div>\n"
+        f"          <div style=\"font-size:0.8rem; color:rgba(255,255,255,0.45);\">\U0001f4cd {ctx['city_state']}</div>\n"
+        "        </div>\n"
         "      </div>\n"
         "    </div>\n"
         "  </section>\n"
@@ -2965,80 +2035,52 @@ def _contact_v2(ctx: dict) -> str:
 
 
 def _contact_v3(ctx: dict) -> str:
-    """Light bg, form on left, contact info cards stacked on right."""
-    p = ctx["primary"]; ab = ctx["accent_bg"]; navy = ctx["navy"]
-    g50 = ctx["gray_50"]; fh = ctx["font_heading"]
-    _addr = f"{ctx['address']}<br>{ctx['city_state']}" if ctx["address"] else ctx["city_state"]
-    contact_cards = "".join(
-        f"<div style=\"background:#fff; border:1px solid #E2E8F0; border-radius:10px; padding:24px;"
-        " display:flex; gap:16px; align-items:flex-start; margin-bottom:16px;\">"
-        f"<div style=\"width:40px; height:40px; background:{ab}; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:1rem; flex-shrink:0;\">{icon}</div>"
-        f"<div><div style=\"font-family:'{fh}',sans-serif; font-size:0.88rem; font-weight:800; color:{navy}; margin-bottom:3px;\">{label}</div>"
-        f"<div style=\"font-size:0.88rem; color:#64748B;\">{value}</div></div></div>"
-        for icon, label, value in [
-            ("\u2709\ufe0f", "Email Us", ctx["email"]),
-            ("\U0001f4cd", "Our Location", _addr),
-            ("\U0001f550", "Dispatch Hours", "Available 24 hours a day, 7 days a week"),
-        ]
-    )
+    """Phone-first layout: big call-to-dispatch primary CTA, form as secondary action."""
+    p = ctx["primary"]; pl = ctx["primary_light"]
+    navy = ctx["navy"]; g50 = ctx["gray_50"]; fh = ctx["font_heading"]
+    ab = ctx["accent_bg"]; abl = ctx["accent_bg_light"]
+    _addr = f"{ctx['address']}, {ctx['city_state']}" if ctx["address"] else ctx["city_state"]
     return (
-        f"  <section class=\"section\" style=\"background:{g50};\" id=\"contact\">\n"
-        "    <div class=\"container\">\n"
-        "      <div class=\"section-header-center reveal\" style=\"margin-bottom:56px;\">\n"
-        "        <span class=\"section-label\">Contact Us</span>\n"
-        "        <h2 class=\"section-heading\">Ready to Talk?</h2>\n"
-        "        <p class=\"section-desc\" style=\"margin:0 auto;\">Whether you need a freight quote or want to apply, we'll get back to you the same day.</p>\n"
-        "      </div>\n"
-        "      <div style=\"display:grid; grid-template-columns:1.1fr 1fr; gap:52px; max-width:1000px; margin:0 auto; align-items:start;\">\n"
-        "        <div class=\"reveal-left\" style=\"background:#fff; border:1px solid #E2E8F0; border-radius:12px; padding:36px;\">\n"
-        f"          <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.1rem; font-weight:800; color:{navy}; margin-bottom:24px;\">Send a Message</h3>\n"
-        "          <form data-blk-form=\"1\">\n"
-        "            <div class=\"field-row\"><div class=\"field\"><label>Name</label><input type=\"text\" placeholder=\"Your full name\" required></div><div class=\"field\"><label>Company</label><input type=\"text\" placeholder=\"Optional\"></div></div>\n"
-        "            <div class=\"field\"><label>Email</label><input type=\"email\" placeholder=\"you@email.com\" required></div>\n"
-        "            <div class=\"field\"><label>Inquiry</label><select><option value=\"\">Select...</option><option>Freight Quote</option><option>Driver Application</option><option>General</option></select></div>\n"
-        "            <div class=\"field\"><label>Message</label><textarea placeholder=\"Describe your freight or ask a question...\"></textarea></div>\n"
-        "            <button type=\"submit\" class=\"btn btn-primary\" style=\"width:100%;\">Submit</button>\n"
-        "          </form>\n"
+        f"  <section id=\"contact\" style=\"background:{g50};\">\n"
+        "    <!-- Phone-first top banner -->\n"
+        f"    <div style=\"background:{navy}; padding:64px 24px; text-align:center;\">\n"
+        "      <div class=\"reveal\">\n"
+        "        <span class=\"section-label\">Get In Touch</span>\n"
+        f"        <h2 style=\"font-family:'{fh}',sans-serif; font-size:clamp(2rem,4vw,3rem); font-weight:900;"
+        " color:#fff; margin-bottom:12px; letter-spacing:-0.5px;\">\U0001f4de Call Dispatch</h2>\n"
+        f"        <p style=\"font-size:1rem; color:rgba(255,255,255,0.5); max-width:480px; margin:0 auto 28px; line-height:1.7;\">"
+        "Our dispatch team is available around the clock. Real people, real answers &mdash; no phone trees.</p>\n"
+        "        <div style=\"display:flex; justify-content:center; gap:20px; flex-wrap:wrap;\">\n"
+        f"          <div style=\"background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12);"
+        f" border-radius:10px; padding:16px 28px; text-align:center;\">"
+        f"<div style=\"font-size:0.7rem; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;\">Email</div>"
+        f"<div style=\"font-family:'{fh}',sans-serif; font-size:0.97rem; font-weight:700; color:{pl};\">{ctx['email']}</div></div>\n"
+        f"          <div style=\"background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12);"
+        " border-radius:10px; padding:16px 28px; text-align:center;\">"
+        "<div style=\"font-size:0.7rem; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;\">Location</div>"
+        f"<div style=\"font-family:'{fh}',sans-serif; font-size:0.97rem; font-weight:700; color:#fff;\">{_addr}</div></div>\n"
+        f"          <div style=\"background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12);"
+        " border-radius:10px; padding:16px 28px; text-align:center;\">"
+        "<div style=\"font-size:0.7rem; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;\">Hours</div>"
+        f"<div style=\"font-family:'{fh}',sans-serif; font-size:0.97rem; font-weight:700; color:#fff;\">24/7 Dispatch</div></div>\n"
         "        </div>\n"
-        f"        <div class=\"reveal-right\">{contact_cards}</div>\n"
         "      </div>\n"
         "    </div>\n"
-        "  </section>\n"
-    )
-
-
-def _contact_v4(ctx: dict) -> str:
-    """Minimal centered form with colored top border, contact details below."""
-    p = ctx["primary"]; abl = ctx["accent_bg_light"]
-    navy = ctx["navy"]; fh = ctx["font_heading"]
-    _addr = f"{ctx['address']}<br>{ctx['city_state']}" if ctx["address"] else ctx["city_state"]
-    details = "".join(
-        f"<div style=\"text-align:center;\"><div style=\"font-size:1.2rem; margin-bottom:4px;\">{icon}</div>"
-        f"<div style=\"font-size:0.82rem; font-weight:700; color:{navy}; margin-bottom:2px;\">{label}</div>"
-        f"<div style=\"font-size:0.82rem; color:#64748B;\">{value}</div></div>"
-        for icon, label, value in [
-            ("\u2709\ufe0f", "Email", ctx["email"]),
-            ("\U0001f4cd", "Location", _addr),
-            ("\U0001f550", "Dispatch", "24/7 Available"),
-        ]
-    )
-    return (
-        f"  <section class=\"section\" style=\"background:{abl};\" id=\"contact\">\n"
-        "    <div class=\"container\">\n"
-        f"      <div class=\"reveal\" style=\"max-width:680px; margin:0 auto; background:#fff;"
-        f" border-radius:14px; border-top:4px solid {p}; box-shadow:0 8px 40px rgba(0,0,0,0.07); padding:48px;\">\n"
-        "        <div style=\"text-align:center; margin-bottom:36px;\">\n"
-        "          <span class=\"section-label\">Contact</span>\n"
-        "          <h2 class=\"section-heading\" style=\"margin-bottom:8px;\">Let's Connect</h2>\n"
-        "          <p style=\"font-size:0.95rem; color:#64748B;\">Freight quote or driver inquiry &mdash; we respond the same day.</p>\n"
+        "    <!-- Secondary form -->\n"
+        "    <div style=\"padding:72px 24px;\">\n"
+        "      <div style=\"max-width:680px; margin:0 auto;\">\n"
+        "        <div class=\"reveal\" style=\"text-align:center; margin-bottom:32px;\">\n"
+        f"          <h3 style=\"font-family:'{fh}',sans-serif; font-size:1.3rem; font-weight:800; color:{navy}; margin-bottom:8px;\">Or Send a Message</h3>\n"
+        "          <p style=\"font-size:0.92rem; color:#64748B;\">Prefer email? Use the form below and we'll get back to you the same day.</p>\n"
         "        </div>\n"
-        "        <form data-blk-form=\"1\">\n"
-        "          <div class=\"field-row\"><div class=\"field\"><label>Name</label><input type=\"text\" placeholder=\"Your name\" required></div><div class=\"field\"><label>Email</label><input type=\"email\" placeholder=\"you@email.com\" required></div></div>\n"
-        "          <div class=\"field\"><label>Inquiry</label><select><option value=\"\">Select type</option><option>Freight Quote</option><option>Driver Application</option><option>General</option></select></div>\n"
-        "          <div class=\"field\"><label>Message</label><textarea placeholder=\"How can we help?\"></textarea></div>\n"
-        "          <button type=\"submit\" class=\"btn btn-primary\" style=\"width:100%; padding:14px;\">Send Message</button>\n"
-        "        </form>\n"
-        f"        <div style=\"margin-top:36px; padding-top:28px; border-top:1px solid #E2E8F0; display:flex; justify-content:center; gap:36px; flex-wrap:wrap;\">{details}</div>\n"
+        "        <div class=\"reveal\" style=\"background:#fff; border:1px solid #E2E8F0; border-radius:14px; padding:40px;\">\n"
+        "          <form data-blk-form=\"1\">\n"
+        "            <div class=\"field-row\"><div class=\"field\"><label>Name</label><input type=\"text\" placeholder=\"Your full name\" required></div><div class=\"field\"><label>Email</label><input type=\"email\" placeholder=\"you@email.com\" required></div></div>\n"
+        "            <div class=\"field\"><label>Subject</label><select><option value=\"\">Select one...</option><option>Freight Quote</option><option>Driver Application</option><option>General Question</option></select></div>\n"
+        "            <div class=\"field\"><label>Message</label><textarea placeholder=\"How can we help?\"></textarea></div>\n"
+        f"            <button type=\"submit\" class=\"btn btn-primary\" style=\"width:100%; padding:14px;\">Send Message</button>\n"
+        "          </form>\n"
+        "        </div>\n"
         "      </div>\n"
         "    </div>\n"
         "  </section>\n"
@@ -3062,7 +2104,7 @@ def generate_website_from_blocks(info: dict) -> str:
     process = random.choice([_process_v1, _process_v2, _process_v3, _process_v4, _process_v5])(ctx)
     about   = random.choice([_about_v1, _about_v2, _about_v3, _about_v4, _about_v5])(ctx)
     careers = random.choice([_careers_v1, _careers_v2, _careers_v3, _careers_v4, _careers_v5])(ctx)
-    contact = random.choice([_contact_v1, _contact_v2, _contact_v3, _contact_v4])(ctx)
+    contact = random.choice([_contact_v1, _contact_v2, _contact_v3])(ctx)
 
     body = _nav(ctx) + hero + process + about + careers + contact + _footer(ctx)
     html = _page_shell(ctx, body)

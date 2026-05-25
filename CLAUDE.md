@@ -65,8 +65,14 @@ Each bot flow uses a `pending_*` dict keyed by `chat_id` to track multi-step con
 | `/close` | Close the browser |
 | `/cancel` | Abort any active flow |
 | `/start` | Show help |
+| `/users` | **Admin only** — list approved users |
+| `/revoke <user_id>` | **Admin only** — remove a user from the approved list |
 
 All commands work standalone (bot asks for input) or with an argument (e.g. `/setup mysite.com`).
+
+### Authorization
+
+Multi-user access controlled by `approved_users.json` (`{approved: {chat_id: {name, username}}}`). `ADMIN_CHAT_ID` comes from `TELEGRAM_CHAT_ID` in `.env` and is always implicitly approved. When an unapproved user messages the bot, an access request is sent to the admin with inline Approve/Deny buttons (`approve:<chat_id>` / `deny:<chat_id>` callbacks). Approved users are persisted by `_save_approved_users()`. The `is_authorized(chat_id)` gate runs on every incoming message/callback.
 
 ### domain_automation.py
 
@@ -127,13 +133,16 @@ Logger name: `automation`. INFO to console (stdout), DEBUG to `logs/automation.l
 - `assets/stock_images/` — stock photos (`hero_*.jpg`, `about_*.jpg`, `coverage_*.jpg`) bundled into generated websites
 - `flow/` — reference screenshots documenting GoDaddy manual flows (email, domain purchase, SSL, domain removal). Not used by code
 - `browser_data/account_N/` — persistent Chrome profiles for each GoDaddy login account
+- `approved_users.json` — persisted list of Telegram chat IDs approved to use the bot (managed via admin commands and approve/deny callbacks)
+- `benefits.txt` — free-form benefits pool used by the generate flow
+- `Websites/` — scratch output directory for generated site artifacts (not read by code)
 
 ## Configuration
 
 All config loaded from `.env` via custom `_load_env()` (no python-dotenv). Key groups:
 - **GoDaddy API** (legacy): key/secret, environment (`production`/`ote` sandbox), registrant contact
 - **GoDaddy Login**: email/password for browser automation (Email & Office and domain purchase have no API)
-- **Telegram**: bot token, authorized chat ID
+- **Telegram**: bot token, admin chat ID (`TELEGRAM_CHAT_ID` — other users gated via `approved_users.json`)
 - **cPanel**: URL, username, API token
 
 ### Multi-account support

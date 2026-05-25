@@ -1086,8 +1086,8 @@ def _generate_random_job_info(route_choice="random"):
 
     # ── Home time (based on job type) ──
     if is_otr:
-        weeks_out = random.choice([2, 3, 4])
-        days_home = random.choice([2, 3]) if weeks_out <= 3 else random.choice([3, 4, 5, 7])
+        weeks_out = random.choice([2, 3])
+        days_home = random.choice([3, 4, 5])
         home_time = f"Home every {weeks_out} weeks for {days_home} days"
         home_time_short = f"{weeks_out} Weeks Out"
         home_time_detail = f"Home {days_home} Days"
