@@ -219,6 +219,61 @@ def _get_user_display(msg) -> str:
 
 TG_BASE = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# RESILIENT HTTP (retry + backoff on transient failures)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_HTTP_MAX_RETRIES = 3      # 4 total attempts
+_HTTP_BACKOFF_BASE = 1.0   # seconds -> waits 1, 2, 4 between attempts
+
+# Transient request-level errors worth retrying. "Connection aborted" is a
+# ConnectionError; slow servers raise Timeout; truncated bodies raise
+# ChunkedEncodingError. None of these mean the request is logically invalid.
+_TRANSIENT_HTTP_EXC = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+)
+
+
+def _http(method, url, **kwargs):
+    """Perform an HTTP request, retrying transient failures with backoff.
+
+    Retries on connection drops ("Connection aborted"), timeouts, truncated
+    responses, and HTTP 5xx — up to _HTTP_MAX_RETRIES times with exponential
+    backoff. Returns the final `requests.Response` (callers still call
+    .raise_for_status()/.json() as before). Re-raises the last transient
+    exception only after all attempts are exhausted.
+    """
+    last_exc = None
+    for attempt in range(_HTTP_MAX_RETRIES + 1):
+        try:
+            resp = requests.request(method, url, **kwargs)
+        except _TRANSIENT_HTTP_EXC as e:
+            last_exc = e
+            if attempt < _HTTP_MAX_RETRIES:
+                wait = _HTTP_BACKOFF_BASE * (2 ** attempt)
+                log.warning(
+                    f"Transient HTTP error on {method} {url} "
+                    f"(attempt {attempt + 1}/{_HTTP_MAX_RETRIES + 1}): {e}; "
+                    f"retrying in {wait}s"
+                )
+                time.sleep(wait)
+                continue
+            raise
+        # Retry transient server errors; return the response on the last attempt
+        # so the caller's raise_for_status() surfaces it normally.
+        if resp.status_code >= 500 and attempt < _HTTP_MAX_RETRIES:
+            wait = _HTTP_BACKOFF_BASE * (2 ** attempt)
+            log.warning(
+                f"HTTP {resp.status_code} on {method} {url} "
+                f"(attempt {attempt + 1}/{_HTTP_MAX_RETRIES + 1}); retrying in {wait}s"
+            )
+            time.sleep(wait)
+            continue
+        return resp
+    raise last_exc  # defensive; loop above returns or raises first
+
 
 def tg_send(chat_id, text, reply_markup=None):
     """Send a message to a Telegram chat."""
@@ -229,14 +284,14 @@ def tg_send(chat_id, text, reply_markup=None):
     }
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
-    resp = requests.post(f"{TG_BASE}/sendMessage", json=payload, timeout=10)
+    resp = _http("POST", f"{TG_BASE}/sendMessage", json=payload, timeout=10)
     resp.raise_for_status()
     return resp.json()
 
 
 def tg_answer_callback(callback_query_id):
     """Acknowledge a callback query (removes the loading spinner on the button)."""
-    requests.post(f"{TG_BASE}/answerCallbackQuery",
+    _http("POST", f"{TG_BASE}/answerCallbackQuery",
                   json={"callback_query_id": callback_query_id}, timeout=10)
 
 
@@ -248,7 +303,7 @@ def tg_edit_message(chat_id, message_id, text):
         "text":       text,
         "parse_mode": "Markdown",
     }
-    requests.post(f"{TG_BASE}/editMessageText", json=payload, timeout=10)
+    _http("POST", f"{TG_BASE}/editMessageText", json=payload, timeout=10)
 
 
 def tg_send_photo(chat_id, photo_path, caption=None):
@@ -258,7 +313,7 @@ def tg_send_photo(chat_id, photo_path, caption=None):
         if caption:
             data["caption"] = caption
             data["parse_mode"] = "Markdown"
-        resp = requests.post(f"{TG_BASE}/sendPhoto", data=data,
+        resp = _http("POST", f"{TG_BASE}/sendPhoto", data=data,
                              files={"photo": f}, timeout=30)
     resp.raise_for_status()
 
@@ -270,14 +325,14 @@ def tg_send_document(chat_id, file_path, caption=None):
         if caption:
             data["caption"] = caption
             data["parse_mode"] = "Markdown"
-        resp = requests.post(f"{TG_BASE}/sendDocument", data=data,
+        resp = _http("POST", f"{TG_BASE}/sendDocument", data=data,
                              files={"document": f}, timeout=60)
     resp.raise_for_status()
 
 
 def tg_delete_message(chat_id, message_id):
     """Delete a message (used to remove password messages for security)."""
-    requests.post(f"{TG_BASE}/deleteMessage",
+    _http("POST", f"{TG_BASE}/deleteMessage",
                   json={"chat_id": chat_id, "message_id": message_id}, timeout=10)
 
 
@@ -286,7 +341,7 @@ def tg_get_updates(offset=None):
     params = {"timeout": 5}
     if offset:
         params["offset"] = offset
-    resp = requests.get(f"{TG_BASE}/getUpdates", params=params, timeout=10)
+    resp = _http("GET", f"{TG_BASE}/getUpdates", params=params, timeout=10)
     resp.raise_for_status()
     return resp.json().get("result", [])
 
@@ -349,7 +404,7 @@ def check_domain_availability(domain: str, account: dict) -> tuple[bool, float]:
     Returns (available: bool, price_usd: float).
     """
     url  = f"{GODADDY_BASE}/v1/domains/available"
-    resp = requests.get(url, headers=_gd_headers(account), params={"domain": domain}, timeout=15)
+    resp = _http("GET", url, headers=_gd_headers(account), params={"domain": domain}, timeout=15)
     resp.raise_for_status()
     data      = resp.json()
     available = data.get("available", False)
@@ -376,7 +431,7 @@ def purchase_domain(domain: str, account: dict, years: int = 1) -> dict:
         "contactRegistrant": registrant,
         "contactTech":       registrant,
     }
-    resp = requests.post(url, headers=_gd_headers(account), json=payload, timeout=30)
+    resp = _http("POST", url, headers=_gd_headers(account), json=payload, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
@@ -394,12 +449,32 @@ def _cpanel_headers(account: dict):
 def cpanel_get_main_domain(account: dict) -> str:
     """Get the primary/main domain from cPanel."""
     url = f"{account['url']}/execute/DomainInfo/list_domains"
-    resp = requests.get(url, headers=_cpanel_headers(account), timeout=15, verify=True)
+    resp = _http("GET", url, headers=_cpanel_headers(account), timeout=15, verify=True)
     resp.raise_for_status()
     result = resp.json()
     main_domain = result.get("data", {}).get("main_domain", "")
     log.debug(f"cPanel main domain: {main_domain}")
     return main_domain
+
+
+def _is_addon_limit_error(error_msg: str) -> bool:
+    """True when a cPanel failure is the addon-domain cap (a hard limit)."""
+    low = (error_msg or "").lower()
+    return "addon" in low and ("maximum" in low or "limit" in low
+                               or "reached" in low or "exceed" in low)
+
+
+def _friendly_cpanel_error(error_msg: str) -> str:
+    """Turn a raw cPanel failure string into a clear, actionable user message.
+
+    The addon-domain cap is a hard account limit (not transient), so retrying
+    won't help — tell the user the concrete next steps instead.
+    """
+    if _is_addon_limit_error(error_msg):
+        return ("🔴 This hosting account is full — the 50 addon-domain limit has "
+                "been reached.\nFree a slot with `/remove_domain`, or deploy to "
+                "another hosting account.")
+    return f"🔴 Failed to add domain to hosting:\n`{error_msg}`"
 
 
 def cpanel_create_domain(domain: str, account: dict) -> dict:
@@ -417,7 +492,7 @@ def cpanel_create_domain(domain: str, account: dict) -> dict:
         "subdomain": domain.replace(".", ""),
         "rootdomain": main_domain,
     }
-    resp = requests.get(url, params=params, headers=_cpanel_headers(account), timeout=30, verify=True)
+    resp = _http("GET", url, params=params, headers=_cpanel_headers(account), timeout=30, verify=True)
     log.debug(f"cPanel addon domain response: {resp.status_code} {resp.text[:500]}")
     resp.raise_for_status()
     result = resp.json()
@@ -440,7 +515,7 @@ def cpanel_upload_file(file_path: str, dest_dir: str, account: dict) -> dict:
     with open(file_path, "rb") as f:
         files = {"file-1": (filename, f)}
         data = {"dir": dest_dir, "overwrite": "1"}
-        resp = requests.post(url, data=data, files=files, headers=_cpanel_headers(account),
+        resp = _http("POST", url, data=data, files=files, headers=_cpanel_headers(account),
                              timeout=120, verify=True)
     resp.raise_for_status()
     result = resp.json()
@@ -460,7 +535,7 @@ def cpanel_extract_file(archive_path: str, dest_dir: str, account: dict) -> dict
         "sourcefiles": archive_path,
         "destfiles": dest_dir,
     }
-    resp = requests.get(url, params=params, headers=_cpanel_headers(account), timeout=120, verify=True)
+    resp = _http("GET", url, params=params, headers=_cpanel_headers(account), timeout=120, verify=True)
     resp.raise_for_status()
     result = resp.json()
     log.debug(f"cPanel extract response: {result}")
@@ -489,7 +564,7 @@ def cpanel_delete_file(file_path: str, account: dict) -> dict:
         "op": "unlink",
         "sourcefiles": file_path,
     }
-    resp = requests.get(url, params=params, headers=_cpanel_headers(account), timeout=30, verify=True)
+    resp = _http("GET", url, params=params, headers=_cpanel_headers(account), timeout=30, verify=True)
     resp.raise_for_status()
     result = resp.json()
     log.debug(f"cPanel delete response: {result}")
@@ -506,7 +581,7 @@ def cpanel_remove_domain(domain: str, account: dict) -> dict:
         "cpanel_jsonapi_module": "AddonDomain",
         "cpanel_jsonapi_func": "listaddondomains",
     }
-    lookup_resp = requests.get(lookup_url, params=lookup_params, headers=_cpanel_headers(account), timeout=15, verify=True)
+    lookup_resp = _http("GET", lookup_url, params=lookup_params, headers=_cpanel_headers(account), timeout=15, verify=True)
     lookup_resp.raise_for_status()
     lookup_data = lookup_resp.json().get("cpanelresult", {}).get("data", [])
 
@@ -531,7 +606,7 @@ def cpanel_remove_domain(domain: str, account: dict) -> dict:
         "domain": domain,
         "subdomain": subdomain,
     }
-    resp = requests.get(url, params=params, headers=_cpanel_headers(account), timeout=30, verify=True)
+    resp = _http("GET", url, params=params, headers=_cpanel_headers(account), timeout=30, verify=True)
     log.debug(f"cPanel remove domain response: {resp.status_code} {resp.text[:500]}")
     resp.raise_for_status()
     result = resp.json()
@@ -550,7 +625,7 @@ def cpanel_remove_domain(domain: str, account: dict) -> dict:
 def cpanel_run_autossl(account: dict):
     """Trigger AutoSSL check via cPanel UAPI."""
     url = f"{account['url']}/execute/SSL/start_autossl_check"
-    resp = requests.get(url, headers=_cpanel_headers(account), timeout=60, verify=True)
+    resp = _http("GET", url, headers=_cpanel_headers(account), timeout=60, verify=True)
     resp.raise_for_status()
     result = resp.json()
     log.debug(f"cPanel AutoSSL response: {result}")
@@ -564,13 +639,13 @@ def cpanel_run_autossl(account: dict):
 def tg_download_file(file_id: str, dest_path: str) -> str:
     """Download a file from Telegram by file_id, save to dest_path."""
     # Get file path from Telegram
-    resp = requests.get(f"{TG_BASE}/getFile", params={"file_id": file_id}, timeout=10)
+    resp = _http("GET", f"{TG_BASE}/getFile", params={"file_id": file_id}, timeout=10)
     resp.raise_for_status()
     file_path = resp.json()["result"]["file_path"]
 
     # Download the actual file
     download_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
-    resp = requests.get(download_url, timeout=60)
+    resp = _http("GET", download_url, timeout=60)
     resp.raise_for_status()
 
     with open(dest_path, "wb") as f:
@@ -1324,7 +1399,7 @@ def _start_website_setup(chat_id, domain, account_idx=None):
                 tg_send(chat_id, f"ℹ️ `{domain}` already exists in hosting. Continuing...")
             else:
                 log.error(f"cPanel domain creation failed: {error_msg}")
-                tg_send(chat_id, f"🔴 Failed to add domain to hosting:\n`{error_msg}`")
+                tg_send(chat_id, _friendly_cpanel_error(error_msg))
                 return
         else:
             tg_send(chat_id, f"✅ `{domain}` added to hosting!")
@@ -1409,7 +1484,7 @@ def _start_remove_domain(chat_id, domain, account_idx=None):
     # Check if domain exists in cPanel first
     try:
         url = f"{account['url']}/execute/DomainInfo/list_domains"
-        resp = requests.get(url, headers=_cpanel_headers(account), timeout=15, verify=True)
+        resp = _http("GET", url, headers=_cpanel_headers(account), timeout=15, verify=True)
         resp.raise_for_status()
         data = resp.json().get("data", {})
         addon_domains = data.get("addon_domains", [])
@@ -2105,7 +2180,7 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
                 if "already" in error_msg.lower() or "exists" in error_msg.lower():
                     tg_send(chat_id, f"ℹ️ `{domain}` already exists in hosting. Continuing...")
                 else:
-                    tg_send(chat_id, f"🔴 Failed to add domain:\n`{error_msg}`")
+                    tg_send(chat_id, _friendly_cpanel_error(error_msg))
                     return
             else:
                 tg_send(chat_id, f"✅ `{domain}` added to hosting!")
@@ -2169,7 +2244,7 @@ def tg_set_commands():
         {"command": "revoke", "description": "Revoke user access (admin)"},
     ]
     try:
-        requests.post(f"{TG_BASE}/setMyCommands",
+        _http("POST", f"{TG_BASE}/setMyCommands",
                       json={"commands": commands}, timeout=10)
         log.info("Bot commands registered with Telegram")
     except Exception as e:
