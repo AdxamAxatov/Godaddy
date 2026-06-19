@@ -1401,6 +1401,12 @@ def _start_website_setup(chat_id, domain, account_idx=None):
             if "already" in error_msg.lower() or "exists" in error_msg.lower():
                 log.info(f"Domain {domain} already exists in cPanel, continuing...")
                 tg_send(chat_id, f"ℹ️ `{domain}` already exists in hosting. Continuing...")
+            elif _is_addon_limit_error(error_msg):
+                log.error(f"cPanel addon cap hit for {domain}")
+                _offer_free_slot(chat_id, account_idx,
+                                 {"kind": "setup", "domain": domain,
+                                  "account_idx": account_idx})
+                return
             else:
                 log.error(f"cPanel domain creation failed: {error_msg}")
                 tg_send(chat_id, _friendly_cpanel_error(error_msg))
@@ -1930,6 +1936,11 @@ def _deploy_to_cpanel(chat_id, domain, zip_path, account_idx):
             error_msg = str(errors)
             if "already" in error_msg.lower() or "exists" in error_msg.lower():
                 tg_send(chat_id, f"ℹ️ `{domain}` already exists in hosting. Continuing...")
+            elif _is_addon_limit_error(error_msg):
+                _offer_free_slot(chat_id, account_idx,
+                                 {"kind": "generate", "domain": domain,
+                                  "zip_path": zip_path, "account_idx": account_idx})
+                return
             else:
                 tg_send(chat_id, _friendly_cpanel_error(error_msg))
                 return
@@ -2141,6 +2152,78 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
         return
 
     # ── Remove domain callbacks ──────────────────────
+    if data.startswith("freeslot_rm:"):
+        rec = _pending_slot_recovery.get(chat_id)
+        if not rec or not rec.get("domains"):
+            tg_edit_message(chat_id, message_id, "⚠️ No active recovery.")
+            return
+        try:
+            idx = int(data.split(":", 1)[1])
+            domain = rec["domains"][idx]
+        except (ValueError, IndexError):
+            tg_edit_message(chat_id, message_id, "⚠️ Invalid choice.")
+            return
+        tg_edit_message(chat_id, message_id, f"🗑 Remove `{domain}`?")
+        tg_send(chat_id, f"⚠️ Permanently remove `{domain}` from hosting?",
+                reply_markup={"inline_keyboard": [[
+                    {"text": "✅ Yes, Remove", "callback_data": f"freeslot_confirm:{idx}"},
+                    {"text": "❌ Cancel", "callback_data": "freeslot_cancel"},
+                ]]})
+        return
+
+    if data.startswith("freeslot_confirm:"):
+        rec = _pending_slot_recovery.get(chat_id)
+        if not rec or not rec.get("domains"):
+            tg_edit_message(chat_id, message_id, "⚠️ No active recovery.")
+            return
+        try:
+            idx = int(data.split(":", 1)[1])
+            domain = rec["domains"][idx]
+        except (ValueError, IndexError):
+            tg_edit_message(chat_id, message_id, "⚠️ Invalid choice.")
+            return
+        account = CPANEL_ACCOUNTS[rec["account_idx"]]
+        retry_ctx = rec.get("retry")
+        tg_edit_message(chat_id, message_id, f"⏳ Removing `{domain}`...")
+        try:
+            result = cpanel_remove_domain(domain, account)
+            if result.get("errors"):
+                log.error(f"Slot-recovery removal failed: {result.get('errors')}")
+                _manual_cpanel_removal_msg(chat_id, domain, account, retry_ctx=retry_ctx)
+                return
+        except Exception as e:
+            log.error(f"Slot-recovery removal error: {e}")
+            _manual_cpanel_removal_msg(chat_id, domain, account, retry_ctx=retry_ctx)
+            return
+        # Success — offer retry. Keep domains list index-stable (don't mutate):
+        # the original list message's buttons stay valid; a tap on an already-
+        # removed domain safely yields cPanel "not found" -> manual fallback.
+        tg_send(chat_id, f"✅ `{domain}` removed.",
+                reply_markup={"inline_keyboard": [[
+                    {"text": "🔁 Retry deploy", "callback_data": "freeslot_retry"},
+                ]]})
+        return
+
+    if data == "freeslot_cancel":
+        _pending_slot_recovery.pop(chat_id, None)
+        tg_edit_message(chat_id, message_id, "🚫 Cancelled.")
+        return
+
+    if data == "freeslot_retry":
+        rec = _pending_slot_recovery.pop(chat_id, None)
+        retry_ctx = rec.get("retry") if rec else None
+        if not retry_ctx:
+            tg_edit_message(chat_id, message_id, "⚠️ Nothing to retry.")
+            return
+        tg_edit_message(chat_id, message_id, "🔁 Retrying...")
+        if retry_ctx["kind"] == "generate":
+            _deploy_to_cpanel(chat_id, retry_ctx["domain"],
+                              retry_ctx["zip_path"], retry_ctx["account_idx"])
+        elif retry_ctx["kind"] == "setup":
+            _start_website_setup(chat_id, retry_ctx["domain"],
+                                 account_idx=retry_ctx["account_idx"])
+        return
+
     if data.startswith("remove_acc:"):
         parts = data.split(":", 2)
         idx = int(parts[1])
@@ -2163,7 +2246,7 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
             errors = result.get("errors")
             if errors:
                 log.error(f"Domain removal failed: {errors}")
-                tg_send(chat_id, f"🔴 Failed to remove `{domain}`:\n`{errors}`")
+                _manual_cpanel_removal_msg(chat_id, domain, account)
             else:
                 log.info(f"Domain removed: {domain} from {account['label']}")
                 tg_send(chat_id, f"✅ `{domain}` has been removed from hosting ({account['label']}).")
