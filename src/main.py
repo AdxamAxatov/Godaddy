@@ -21,6 +21,8 @@ import re
 import time
 import tempfile
 import random
+import threading
+import queue
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -166,6 +168,7 @@ log = setup_logging()
 # ── User approval system ─────────────────────────────
 _APPROVED_USERS_FILE = str(_PROJECT_ROOT / "approved_users.json")
 _pending_approvals = {}  # chat_id str -> {name, username} — awaiting admin decision
+_auth_lock = threading.Lock()  # guards APPROVED_USERS and _pending_approvals (cross-thread)
 
 def _load_approved_users() -> dict:
     """Load approved users from JSON file. Returns {id_str: {name, username}}."""
@@ -190,7 +193,8 @@ APPROVED_USERS[ADMIN_CHAT_ID] = {"name": "Admin", "username": ""}  # Admin alway
 
 def is_authorized(chat_id) -> bool:
     """Check if a user is approved."""
-    return str(chat_id) in APPROVED_USERS
+    with _auth_lock:
+        return str(chat_id) in APPROVED_USERS
 
 
 # ── Browser flows (/buy, /email, /close) are shelved. Set True to re-enable. ──
@@ -681,12 +685,13 @@ def handle_message(chat_id, text, message_id=None):
         if str(chat_id) != ADMIN_CHAT_ID:
             tg_send(chat_id, "⚠️ Admin only.")
             return
-        if not APPROVED_USERS:
+        with _auth_lock:
+            snapshot = sorted(APPROVED_USERS.items())
+        if not snapshot:
             tg_send(chat_id, "No approved users.")
         else:
             lines = ["👥 *Approved Users*\n"]
-            for uid in sorted(APPROVED_USERS):
-                info = APPROVED_USERS[uid]
+            for uid, info in snapshot:
                 name = info.get("name", "Unknown")
                 username = info.get("username", "")
                 role = "👑 Admin" if uid == ADMIN_CHAT_ID else "👤 User"
@@ -708,9 +713,12 @@ def handle_message(chat_id, text, message_id=None):
         if target_id == ADMIN_CHAT_ID:
             tg_send(chat_id, "⚠️ Cannot revoke admin.")
             return
-        if target_id in APPROVED_USERS:
-            del APPROVED_USERS[target_id]
-            _save_approved_users(APPROVED_USERS)
+        with _auth_lock:
+            existed = target_id in APPROVED_USERS
+            if existed:
+                del APPROVED_USERS[target_id]
+                _save_approved_users(APPROVED_USERS)
+        if existed:
             tg_send(chat_id, f"✅ User `{target_id}` has been revoked.")
             tg_send(int(target_id), "🔒 Your access has been revoked by the admin.")
             log.info(f"User {target_id} revoked by admin")
@@ -1721,9 +1729,10 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
     # Admin: approve/deny user access
     if data.startswith("approve:"):
         target_id = data.split(":", 1)[1]
-        user_info = _pending_approvals.pop(target_id, {"name": "Unknown", "username": ""})
-        APPROVED_USERS[target_id] = user_info
-        _save_approved_users(APPROVED_USERS)
+        with _auth_lock:
+            user_info = _pending_approvals.pop(target_id, {"name": "Unknown", "username": ""})
+            APPROVED_USERS[target_id] = user_info
+            _save_approved_users(APPROVED_USERS)
         tg_edit_message(chat_id, message_id, f"✅ User `{target_id}` approved.")
         tg_send(int(target_id), "✅ Your access has been approved! Send /start to begin.")
         log.info(f"User {target_id} approved by admin")
@@ -1731,7 +1740,8 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
 
     if data.startswith("deny:"):
         target_id = data.split(":", 1)[1]
-        _pending_approvals.pop(target_id, None)
+        with _auth_lock:
+            _pending_approvals.pop(target_id, None)
         tg_edit_message(chat_id, message_id, f"❌ User `{target_id}` denied.")
         tg_send(int(target_id), "❌ Your access request has been denied.")
         log.info(f"User {target_id} denied by admin")
