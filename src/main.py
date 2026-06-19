@@ -192,6 +192,13 @@ def is_authorized(chat_id) -> bool:
     """Check if a user is approved."""
     return str(chat_id) in APPROVED_USERS
 
+
+# ── Browser flows (/buy, /email, /close) are shelved. Set True to re-enable. ──
+# NOTE: re-enabling requires revisiting active_browser locking + single-owner
+# browser lifecycle (see docs/superpowers/specs/2026-06-19-...-design.md),
+# because GoDaddyEmailBot's sync-Playwright objects are thread-affine.
+BROWSER_FLOWS_ENABLED = False
+
 def _get_user_display(msg) -> str:
     """Get a display name from a Telegram message's 'from' field."""
     user = msg.get("from", {})
@@ -618,9 +625,7 @@ def handle_message(chat_id, text, message_id=None):
         tg_send(chat_id,
                 "👋 *GoDaddy Domain Bot*\n\n"
                 "What I can do:\n"
-                "• /buy — purchase a domain\n"
                 "• /setup — deploy a website\n"
-                "• /email — create an email account\n"
                 "• /generate — generate website + job description\n"
                 "• /run\\_autossl — run AutoSSL for a domain\n"
                 "• /remove\\_domain — remove a domain from hosting")
@@ -659,6 +664,9 @@ def handle_message(chat_id, text, message_id=None):
 
     # Command: /close — close the browser
     if text == "/close":
+        if not BROWSER_FLOWS_ENABLED:
+            tg_send(chat_id, "⚠️ This command is temporarily disabled.")
+            return
         bot = active_browser.pop(chat_id, None)
         if bot:
             bot.close()
@@ -712,6 +720,9 @@ def handle_message(chat_id, text, message_id=None):
 
     # Command: /email — create email account
     if text == "/email" or text.startswith("/email "):
+        if not BROWSER_FLOWS_ENABLED:
+            tg_send(chat_id, "⚠️ This command is temporarily disabled.")
+            return
         domain = text.split(" ", 1)[1].strip() if " " in text else ""
         if domain:
             if not DOMAIN_RE.match(domain):
@@ -765,6 +776,9 @@ def handle_message(chat_id, text, message_id=None):
 
     # Command: /buy — purchase a domain
     if text == "/buy" or text.startswith("/buy "):
+        if not BROWSER_FLOWS_ENABLED:
+            tg_send(chat_id, "⚠️ This command is temporarily disabled.")
+            return
         pending_buy[chat_id] = {"step": "awaiting_company"}
         tg_send(chat_id, "💰 *Domain Purchase*\n\nWhat is the company name?\nExample: `Werner Enterprises`",
                 reply_markup={"inline_keyboard": [[
@@ -2067,13 +2081,10 @@ def tg_set_commands():
     """Register bot commands so they appear in Telegram's menu."""
     commands = [
         {"command": "start", "description": "Show welcome message"},
-        {"command": "buy", "description": "Purchase a domain"},
-        {"command": "email", "description": "Create M365 email account"},
         {"command": "setup", "description": "Deploy website to hosting"},
         {"command": "generate", "description": "Generate website + job description"},
         {"command": "run_autossl", "description": "Run AutoSSL for a domain"},
         {"command": "remove_domain", "description": "Remove a domain from hosting"},
-        {"command": "close", "description": "Close the browser"},
         {"command": "cancel", "description": "Cancel current operation"},
         {"command": "users", "description": "List approved users (admin)"},
         {"command": "revoke", "description": "Revoke user access (admin)"},
