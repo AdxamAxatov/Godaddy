@@ -594,6 +594,9 @@ def generate_job_description(info: dict) -> str:
         return f"<p><b>{title}</b></p>\n{content_html}"
 
     # ── 1. Pay & Compensation ──
+    # Indeed rule: one defined range with a unit/period. Never "up to", stacked
+    # ranges, or exaggerated/"guaranteed" earnings — those get flagged. A bonus
+    # alongside the range is allowed (Indeed's own examples show "plus bonus").
     pay_bullets = [f"{pay_range} (weekly gross)", "Paid weekly via direct deposit"]
     if info.get("orientation_pay"):
         pay_bullets.append(f"{info['orientation_pay']} paid orientation")
@@ -694,12 +697,15 @@ def generate_job_description(info: dict) -> str:
         bullets = random.sample(culture_pool, k=random.randint(3, 4))
         extra_html = _section(titles["culture"], _ul(bullets))
     else:
+        # Keep CTAs on-platform (Indeed Apply button) and free of off-platform
+        # routing ("call/text/email us") or misleading time guarantees — both
+        # can get a posting flagged or removed.
         apply_lines = [
-            f"Ready to make a move? Apply today and a member of our recruiting team will reach out within 24 hours. We make the process straightforward — no runaround.",
-            f"If {company} sounds like the right fit, don't wait. Apply now and let's talk. We respect your time and give straight answers.",
-            f"Applying takes two minutes. If you meet the qualifications and want consistent work with a carrier that delivers on its promises, hit apply and we'll be in touch.",
-            f"Take the next step. Apply today to connect with our team. We review applications daily and move fast for qualified drivers.",
-            f"Don't let this one sit. {company} reviews applications daily — apply now and get a real answer quickly.",
+            f"Ready to make a move? Hit Apply and submit your application through Indeed — qualified drivers hear back quickly.",
+            f"If {company} sounds like the right fit, apply through Indeed and our team will review your application.",
+            f"Applying takes two minutes. Use the Apply button and we'll follow up on next steps.",
+            f"Take the next step and apply on Indeed. We review applications daily for qualified drivers.",
+            f"Qualified and interested? Apply now through Indeed to get the process started.",
         ]
         extra_html = f"<p><b>{titles['apply']}</b></p>\n<p>{random.choice(apply_lines)}</p>"
 
