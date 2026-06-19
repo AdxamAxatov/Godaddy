@@ -2107,6 +2107,119 @@ def tg_set_commands():
         log.warning(f"Failed to register commands: {e}")
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CONCURRENCY: dispatcher + per-chat worker threads
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_chat_workers = {}            # chat_id -> ChatWorker
+_workers_lock = threading.Lock()
+
+
+class ChatWorker:
+    """One daemon thread + queue per chat. Processes that chat's updates in order."""
+
+    def __init__(self, chat_id):
+        self.chat_id = chat_id
+        self.queue = queue.Queue()
+        self.thread = threading.Thread(
+            target=self._run, name=f"chat-{chat_id}", daemon=True
+        )
+        self.thread.start()
+
+    def submit(self, update):
+        self.queue.put(update)
+
+    def _run(self):
+        while True:
+            update = self.queue.get()
+            try:
+                process_update(update)
+            except Exception:
+                log.exception(f"Worker error processing update for chat {self.chat_id}")
+                try:
+                    tg_send(self.chat_id, "⚠️ Something went wrong, please try again.")
+                except Exception:
+                    pass
+
+
+def _get_worker(chat_id):
+    """Get (or lazily create) the worker for a chat."""
+    with _workers_lock:
+        worker = _chat_workers.get(chat_id)
+        if worker is None:
+            worker = ChatWorker(chat_id)
+            _chat_workers[chat_id] = worker
+        return worker
+
+
+def _handle_unapproved(chat_id, msg):
+    """Main-thread access-request flow for an unapproved user (deduped, runs once)."""
+    str_id = str(chat_id)
+    with _auth_lock:
+        already = str_id in _pending_approvals
+        if not already:
+            user = msg.get("from", {})
+            _pending_approvals[str_id] = {
+                "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or "Unknown",
+                "username": user.get("username", ""),
+            }
+    if already:
+        return
+    display = _get_user_display(msg)
+    tg_send(chat_id, "🔒 You don't have access to this bot.\nA request has been sent to the admin.")
+    tg_send(int(ADMIN_CHAT_ID),
+            f"🔔 *Access Request*\n\n"
+            f"User: {display}\n"
+            f"ID: `{chat_id}`",
+            reply_markup={"inline_keyboard": [[
+                {"text": "✅ Approve", "callback_data": f"approve:{chat_id}"},
+                {"text": "❌ Deny", "callback_data": f"deny:{chat_id}"},
+            ]]})
+    log.info(f"[{chat_id}] Access requested by {display}")
+
+
+def process_update(update):
+    """Route an already-authorized update to the right handler (runs on a worker)."""
+    if "message" in update:
+        msg = update["message"]
+        chat_id = msg["chat"]["id"]
+        if "document" in msg:
+            handle_document(chat_id, msg["document"], msg)
+            return
+        text = msg.get("text", "")
+        if text:
+            handle_message(chat_id, text, msg.get("message_id"))
+    elif "callback_query" in update:
+        cb = update["callback_query"]
+        chat_id = cb["message"]["chat"]["id"]
+        data = cb.get("data", "")
+        handle_callback(cb["id"], chat_id, cb["message"]["message_id"], data)
+
+
+def dispatch(update):
+    """Main-thread routing: authorize, then enqueue to the chat's worker."""
+    if "message" in update:
+        msg = update["message"]
+        chat_id = msg["chat"]["id"]
+        if not is_authorized(chat_id):
+            _handle_unapproved(chat_id, msg)
+            return
+        _get_worker(chat_id).submit(update)
+
+    elif "callback_query" in update:
+        cb = update["callback_query"]
+        chat_id = cb["message"]["chat"]["id"]
+        data = cb.get("data", "")
+        # Admin approve/deny: only the admin may trigger; handled on a worker.
+        if data.startswith("approve:") or data.startswith("deny:"):
+            if str(chat_id) == ADMIN_CHAT_ID:
+                _get_worker(chat_id).submit(update)
+            return
+        if not is_authorized(chat_id):
+            return
+        _get_worker(chat_id).submit(update)
+
+
 def run():
     log.info("Bot started. Listening for messages...")
     print()
@@ -2148,61 +2261,10 @@ def run():
 
         for update in updates:
             offset = update["update_id"] + 1
-
-            if "message" in update:
-                msg = update["message"]
-                chat_id = msg["chat"]["id"]
-
-                # Unapproved user — send access request to admin
-                if not is_authorized(chat_id):
-                    str_id = str(chat_id)
-                    if str_id not in _pending_approvals:
-                        user = msg.get("from", {})
-                        _pending_approvals[str_id] = {
-                            "name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or "Unknown",
-                            "username": user.get("username", ""),
-                        }
-                        display = _get_user_display(msg)
-                        tg_send(chat_id, "🔒 You don't have access to this bot.\nA request has been sent to the admin.")
-                        tg_send(int(ADMIN_CHAT_ID),
-                                f"🔔 *Access Request*\n\n"
-                                f"User: {display}\n"
-                                f"ID: `{chat_id}`",
-                                reply_markup={"inline_keyboard": [[
-                                    {"text": "✅ Approve", "callback_data": f"approve:{chat_id}"},
-                                    {"text": "❌ Deny", "callback_data": f"deny:{chat_id}"},
-                                ]]})
-                        log.info(f"[{chat_id}] Access requested by {display}")
-                    continue
-
-                # Handle file uploads (zip for website deployment)
-                if "document" in msg:
-                    handle_document(chat_id, msg["document"], msg)
-                    continue
-
-                text = msg.get("text", "")
-                if text:
-                    handle_message(chat_id, text, msg.get("message_id"))
-
-            elif "callback_query" in update:
-                cb = update["callback_query"]
-                chat_id = cb["message"]["chat"]["id"]
-                data = cb.get("data", "")
-
-                # Admin approval/deny callbacks — always allow for admin
-                if data.startswith("approve:") or data.startswith("deny:"):
-                    if str(chat_id) == ADMIN_CHAT_ID:
-                        handle_callback(cb["id"], chat_id, cb["message"]["message_id"], data)
-                    continue
-
-                if not is_authorized(chat_id):
-                    continue
-                handle_callback(
-                    cb["id"],
-                    chat_id,
-                    cb["message"]["message_id"],
-                    data,
-                )
+            try:
+                dispatch(update)
+            except Exception:
+                log.exception("Dispatch error")
 
 
 if __name__ == "__main__":
