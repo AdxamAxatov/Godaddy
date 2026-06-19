@@ -1458,6 +1458,15 @@ def _start_autossl(chat_id, domain, account_idx=None):
         tg_send(chat_id, f"🔴 AutoSSL error:\n`{e}`")
 
 
+def _list_addon_domains(account: dict) -> list:
+    """Return the account's addon domains (addon only — not main/parked)."""
+    url = f"{account['url']}/execute/DomainInfo/list_domains"
+    resp = _http("GET", url, headers=_cpanel_headers(account), timeout=15, verify=True)
+    resp.raise_for_status()
+    data = resp.json().get("data", {})
+    return list(data.get("addon_domains", []))
+
+
 def _start_remove_domain(chat_id, domain, account_idx=None):
     """Remove a domain from cPanel hosting — pick account, confirm, then delete."""
     log.info(f"Domain removal requested: {domain}")
@@ -1487,8 +1496,9 @@ def _start_remove_domain(chat_id, domain, account_idx=None):
         resp = _http("GET", url, headers=_cpanel_headers(account), timeout=15, verify=True)
         resp.raise_for_status()
         data = resp.json().get("data", {})
-        addon_domains = data.get("addon_domains", [])
-        all_domains = addon_domains + data.get("parked_domains", []) + [data.get("main_domain", "")]
+        all_domains = (list(data.get("addon_domains", []))
+                       + list(data.get("parked_domains", []))
+                       + [data.get("main_domain", "")])
         if domain not in all_domains:
             tg_send(chat_id, f"❌ `{domain}` was not found on hosting ({account['label']}).")
             pending_remove_domain.pop(chat_id, None)
