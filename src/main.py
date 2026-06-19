@@ -1859,6 +1859,71 @@ def _submit_email(chat_id):
 # CALLBACK HANDLER
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+def _deploy_to_cpanel(chat_id, domain, zip_path, account_idx):
+    """Create the domain, upload + extract the zip, delete the server-side zip.
+
+    Takes explicit params (no _pending_deploys / _pending_slot_recovery access),
+    so both the original deploy and the post-removal retry call it the same way.
+    """
+    account = CPANEL_ACCOUNTS[account_idx]
+
+    # Create domain on cPanel
+    tg_send(chat_id, f"🌐 Adding `{domain}` to hosting ({account['label']})...")
+    try:
+        result = cpanel_create_domain(domain, account)
+        errors = result.get("errors")
+        if errors:
+            error_msg = str(errors)
+            if "already" in error_msg.lower() or "exists" in error_msg.lower():
+                tg_send(chat_id, f"ℹ️ `{domain}` already exists in hosting. Continuing...")
+            else:
+                tg_send(chat_id, _friendly_cpanel_error(error_msg))
+                return
+        else:
+            tg_send(chat_id, f"✅ `{domain}` added to hosting!")
+    except Exception as e:
+        tg_send(chat_id, f"🔴 Failed to add domain:\n`{e}`")
+        return
+
+    # Upload zip to cPanel
+    dest_dir = f"/public_html/{domain}"
+    file_name = Path(zip_path).name
+    tg_send(chat_id, f"📤 Uploading to `{dest_dir}`...")
+    try:
+        cpanel_upload_file(zip_path, dest_dir, account)
+        log.info(f"Uploaded {file_name} to {dest_dir}")
+    except Exception as e:
+        tg_send(chat_id, f"🔴 Upload failed:\n`{e}`")
+        return
+    finally:
+        try:
+            os.remove(zip_path)
+        except OSError:
+            pass
+
+    # Extract
+    archive_path = f"{dest_dir}/{file_name}"
+    tg_send(chat_id, f"📂 Extracting `{file_name}`...")
+    try:
+        cpanel_extract_file(archive_path, dest_dir, account)
+        log.info(f"Extracted {file_name} in {dest_dir}")
+    except Exception as e:
+        tg_send(chat_id, f"🔴 Extraction failed:\n`{e}`")
+        return
+
+    # Delete zip from server
+    try:
+        cpanel_delete_file(archive_path, account)
+    except Exception:
+        pass
+
+    tg_send(chat_id,
+            f"✅ *Website deployed!*\n\n"
+            f"Domain: `{domain}`\n"
+            f"Your site should be live at: http://{domain}")
+    log.info(f"Generated website deployed for {domain}")
+
+
 def handle_callback(callback_query_id, chat_id, message_id, data):
     """Handle an inline button press."""
     log.info(f"[{chat_id}] Callback: {data}")
@@ -2176,65 +2241,7 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
         if not deploy:
             return
         idx = int(data.split(":")[1])
-        domain = deploy["domain"]
-        zip_path = deploy["zip_path"]
-        account = CPANEL_ACCOUNTS[idx]
-
-        # Create domain on cPanel
-        tg_send(chat_id, f"🌐 Adding `{domain}` to hosting ({account['label']})...")
-        try:
-            result = cpanel_create_domain(domain, account)
-            errors = result.get("errors")
-            if errors:
-                error_msg = str(errors)
-                if "already" in error_msg.lower() or "exists" in error_msg.lower():
-                    tg_send(chat_id, f"ℹ️ `{domain}` already exists in hosting. Continuing...")
-                else:
-                    tg_send(chat_id, _friendly_cpanel_error(error_msg))
-                    return
-            else:
-                tg_send(chat_id, f"✅ `{domain}` added to hosting!")
-        except Exception as e:
-            tg_send(chat_id, f"🔴 Failed to add domain:\n`{e}`")
-            return
-
-        # Upload zip to cPanel
-        dest_dir = f"/public_html/{domain}"
-        file_name = Path(zip_path).name
-        tg_send(chat_id, f"📤 Uploading to `{dest_dir}`...")
-        try:
-            cpanel_upload_file(zip_path, dest_dir, account)
-            log.info(f"Uploaded {file_name} to {dest_dir}")
-        except Exception as e:
-            tg_send(chat_id, f"🔴 Upload failed:\n`{e}`")
-            return
-        finally:
-            try:
-                os.remove(zip_path)
-            except OSError:
-                pass
-
-        # Extract
-        archive_path = f"{dest_dir}/{file_name}"
-        tg_send(chat_id, f"📂 Extracting `{file_name}`...")
-        try:
-            cpanel_extract_file(archive_path, dest_dir, account)
-            log.info(f"Extracted {file_name} in {dest_dir}")
-        except Exception as e:
-            tg_send(chat_id, f"🔴 Extraction failed:\n`{e}`")
-            return
-
-        # Delete zip from server
-        try:
-            cpanel_delete_file(archive_path, account)
-        except Exception:
-            pass
-
-        tg_send(chat_id,
-                f"✅ *Website deployed!*\n\n"
-                f"Domain: `{domain}`\n"
-                f"Your site should be live at: http://{domain}")
-        log.info(f"Generated website deployed for {domain}")
+        _deploy_to_cpanel(chat_id, deploy["domain"], deploy["zip_path"], idx)
         return
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
