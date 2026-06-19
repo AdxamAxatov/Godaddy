@@ -23,6 +23,7 @@ import tempfile
 import random
 import threading
 import queue
+import company_lookup
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -834,11 +835,12 @@ def handle_message(chat_id, text, message_id=None):
         pending_generate[chat_id] = {"step": "awaiting_info"}
         tg_send(chat_id,
                 "🏗️ *Website Generator*\n\n"
-                "Send company details in one message:\n\n"
+                "Send the company email — I'll look up the name & address:\n"
+                "`info@company.com`\n\n"
+                "_Or paste full details:_\n"
                 "`Company: 2-3 Logistics Corp\n"
                 "Email: info@2-3logisticscorp.com\n"
-                "Address: 508 Linden Dr, Round Lake, IL 60073`\n\n"
-                "_Domain extracted from email. Job info generated automatically._")
+                "Address: 508 Linden Dr, Round Lake, IL 60073`")
         return
 
     # Route to generate flow if user is in one
@@ -1006,10 +1008,67 @@ _GENERATE_FIELDS = {
 
 _GENERATE_REQUIRED = ["company_name", "email", "full_address"]
 
+# A message that is ONLY an email address triggers CSV auto-fill.
+_BARE_EMAIL_RE = re.compile(r"^\s*([^@\s]+@[^@\s]+\.[^@\s]+)\s*$")
+
+
+def _ask_route_type(chat_id):
+    """Advance the generate flow to the route-type picker."""
+    pending_generate[chat_id]["step"] = "awaiting_route_type"
+    tg_send(chat_id, "🛣️ *Route type for this job?*",
+            reply_markup={"inline_keyboard": [[
+                {"text": "🚛 OTR", "callback_data": "gen_route:otr"},
+                {"text": "🏠 Regional", "callback_data": "gen_route:regional"},
+                {"text": "🎲 Random", "callback_data": "gen_route:random"},
+            ]]})
+
+
+def _apply_company_record(chat_id, rec):
+    """Fill the generate state from a company_lookup record, then ask route type."""
+    state = pending_generate[chat_id]
+    company = rec["legal_name"]
+    state["company_name"] = company
+    state["company_short"] = company
+    state["address"] = rec.get("address", "")
+    state["city_state"] = rec.get("city_state", "")
+    state.pop("company_candidates", None)
+    loc = ", ".join(p for p in (rec.get("address"), rec.get("city_state")) if p)
+    tg_send(chat_id, f"✅ *{company}*\n{loc}")
+    _ask_route_type(chat_id)
+
+
+def _handle_email_lookup(chat_id, email):
+    """Look the email's company up in the CSV and route to fill/picker/fallback."""
+    state = pending_generate[chat_id]
+    state["email"] = email
+    state["domain"] = email.split("@", 1)[1]
+    matches = company_lookup.lookup(email)
+    if len(matches) == 1:
+        _apply_company_record(chat_id, matches[0])
+    elif len(matches) > 1:
+        state["company_candidates"] = matches
+        buttons = [[{"text": f"{m['legal_name']} — {m['city_state']}",
+                     "callback_data": f"gen_company:{i}"}]
+                   for i, m in enumerate(matches)]
+        tg_send(chat_id,
+                f"🏢 Found {len(matches)} companies with that name. Which location?",
+                reply_markup={"inline_keyboard": buttons})
+    else:
+        tg_send(chat_id,
+                "🔍 Couldn't find that company in the list.\n\n"
+                "Paste the details instead:\n"
+                "`Company: ...\nEmail: ...\nAddress: ...`")
+
 
 def _handle_generate_input(chat_id, raw_text):
     """Parse the single-message info block and generate."""
     state = pending_generate[chat_id]
+
+    # A lone email address -> auto-fill company + address from the CSV.
+    m = _BARE_EMAIL_RE.match(raw_text)
+    if m:
+        _handle_email_lookup(chat_id, m.group(1))
+        return
 
     # Parse "Label: Value" lines
     parsed = {}
@@ -1065,13 +1124,7 @@ def _handle_generate_input(chat_id, raw_text):
 
     # Merge parsed into state, then ask for route type
     state.update(parsed)
-    state["step"] = "awaiting_route_type"
-    tg_send(chat_id, "🛣️ *Route type for this job?*",
-            reply_markup={"inline_keyboard": [[
-                {"text": "🚛 OTR", "callback_data": "gen_route:otr"},
-                {"text": "🏠 Regional", "callback_data": "gen_route:regional"},
-                {"text": "🎲 Random", "callback_data": "gen_route:random"},
-            ]]})
+    _ask_route_type(chat_id)
 
 
 def _generate_random_job_info(route_choice="random"):
@@ -1793,6 +1846,22 @@ def handle_callback(callback_query_id, chat_id, message_id, data):
         pending_buy[chat_id]["step"] = "awaiting_domain"
         tg_edit_message(chat_id, message_id, "🔄 Trying another domain.")
         tg_send(chat_id, "What domain? Example: `mysite.com`")
+        return
+
+    if data.startswith("gen_company:"):
+        state = pending_generate.get(chat_id)
+        candidates = state.get("company_candidates") if state else None
+        if not candidates:
+            tg_edit_message(chat_id, message_id, "⚠️ No active generate flow.")
+            return
+        try:
+            idx = int(data.split(":", 1)[1])
+            rec = candidates[idx]
+        except (ValueError, IndexError):
+            tg_edit_message(chat_id, message_id, "⚠️ Invalid choice.")
+            return
+        tg_edit_message(chat_id, message_id, f"📍 {rec['legal_name']} — {rec['city_state']}")
+        _apply_company_record(chat_id, rec)
         return
 
     if data.startswith("gen_route:"):
