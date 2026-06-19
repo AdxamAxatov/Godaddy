@@ -42,3 +42,9 @@ Desktop.ini
 .DS_Store
 
 benefits.txt
+
+# Local agent / IDE tooling (not for the repo)
+.claude/
+.claude-flow/
+.cursor/
+.mcp.json
