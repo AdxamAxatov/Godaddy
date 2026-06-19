@@ -684,6 +684,7 @@ pending_generate = {}  # chat_id -> {step, ...collected info}
 
 # Generated zips awaiting optional deploy
 _pending_deploys = {}  # chat_id -> {zip_path, domain}
+_pending_slot_recovery = {}  # chat_id -> {account_idx, domains, retry}
 
 # AutoSSL flow state
 pending_autossl = {}  # chat_id -> {step, domain}
@@ -738,6 +739,9 @@ def handle_message(chat_id, text, message_id=None):
             cancelled = True
         if chat_id in pending_remove_domain:
             del pending_remove_domain[chat_id]
+            cancelled = True
+        if chat_id in _pending_slot_recovery:
+            del _pending_slot_recovery[chat_id]
             cancelled = True
         tg_send(chat_id, "🚫 Cancelled." if cancelled else "Nothing to cancel.")
         return
@@ -1858,6 +1862,56 @@ def _submit_email(chat_id):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CALLBACK HANDLER
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _manual_cpanel_removal_msg(chat_id, domain, account, retry_ctx=None):
+    """Tell the user to remove a specific domain manually in cPanel (auto-removal failed)."""
+    markup = None
+    if retry_ctx is not None:
+        markup = {"inline_keyboard": [[
+            {"text": "🔁 Retry deploy", "callback_data": "freeslot_retry"},
+        ]]}
+    tg_send(chat_id,
+            f"⚠️ Couldn't remove `{domain}` automatically (cPanel refused / no access).\n\n"
+            f"Remove it manually: log into cPanel → *Domains / Addon Domains* → "
+            f"delete `{domain}`.\n"
+            f"cPanel: {account['url']}",
+            reply_markup=markup)
+
+
+def _offer_free_slot(chat_id, account_idx, retry_ctx):
+    """On the addon cap, offer to remove a domain (buttons) and retry the deploy."""
+    account = CPANEL_ACCOUNTS[account_idx]
+    tg_send(chat_id,
+            "🔴 This hosting account is full — the 50 addon-domain limit has been "
+            "reached.\nYou can remove a domain to free a slot, then retry.")
+    # Stash retry context first so the Retry button works on every path below.
+    _pending_slot_recovery[chat_id] = {
+        "account_idx": account_idx, "domains": [], "retry": retry_ctx,
+    }
+    try:
+        domains = _list_addon_domains(account)
+    except Exception as e:
+        log.error(f"Could not list addon domains: {e}")
+        domains = []
+    if not domains:
+        # Can't list the account's domains — guide the user to free a slot
+        # manually (don't name the domain being deployed; it isn't in cPanel).
+        tg_send(chat_id,
+                "⚠️ I couldn't list this account's domains to remove one "
+                "automatically.\nFree a slot manually: log into cPanel → "
+                "*Domains / Addon Domains* → delete a domain, then tap Retry.\n"
+                f"cPanel: {account['url']}",
+                reply_markup={"inline_keyboard": [[
+                    {"text": "🔁 Retry deploy", "callback_data": "freeslot_retry"},
+                ]]})
+        return
+    _pending_slot_recovery[chat_id]["domains"] = domains
+    buttons = [[{"text": f"🗑 {d}", "callback_data": f"freeslot_rm:{i}"}]
+               for i, d in enumerate(domains)]
+    buttons.append([{"text": "❌ Cancel", "callback_data": "freeslot_cancel"}])
+    tg_send(chat_id, "Which domain should I remove to free a slot?",
+            reply_markup={"inline_keyboard": buttons})
+
 
 def _deploy_to_cpanel(chat_id, domain, zip_path, account_idx):
     """Create the domain, upload + extract the zip, delete the server-side zip.
