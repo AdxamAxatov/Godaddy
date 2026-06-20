@@ -38,6 +38,27 @@ def _resolve_owner_name(email: str, domain: str) -> str:
     return random.Random(seed).choice(_OWNER_FIRST_NAMES)
 
 
+_COMPANY_DATA_RE = re.compile(
+    r'<script[^>]*id="company-data"[^>]*>(.*?)</script>', re.DOTALL)
+
+
+def _company_data_script(data: dict) -> str:
+    """Embed posting data as breakout-safe JSON in a <script> tag."""
+    payload = json.dumps(data).replace("<", "\\u003c")
+    return f'<script type="application/json" id="company-data">{payload}</script>\n'
+
+
+def extract_company_data(html: str):
+    """Return the embedded company-data dict, or None if absent/unparseable."""
+    m = _COMPANY_DATA_RE.search(html or "")
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(1))
+    except (ValueError, TypeError):
+        return None
+
+
 # ── Stock image pools ──────────────────────────────────
 _ASSETS_DIR = Path(__file__).parent.parent / "assets" / "stock_images"
 _HERO_IMAGES = sorted(_ASSETS_DIR.glob("hero_*.jpg"))
