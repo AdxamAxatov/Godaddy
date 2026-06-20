@@ -2159,7 +2159,17 @@ def generate_website_from_blocks(info: dict) -> str:
     careers = random.choice([_careers_v1, _careers_v2, _careers_v3, _careers_v4, _careers_v5])(ctx)
     contact = random.choice([_contact_v1, _contact_v2, _contact_v3])(ctx)
 
-    body = _nav(ctx) + hero + process + about + careers + contact + _footer(ctx)
+    owner_name = _resolve_owner_name(info.get("email", ""), ctx["domain"])
+    company_data = {
+        "company_name": ctx["company_name"], "domain": ctx["domain"],
+        "email": ctx["email"], "address": ctx["address"],
+        "city_state": ctx["city_state"], "owner_name": owner_name,
+        "job_title": ctx["job_title"], "pay_range": ctx["pay_range"],
+        "home_time": ctx["home_time"], "min_experience": ctx["min_experience"],
+        "routes_type": ctx["routes_type"], "perks": ctx["perks"],
+    }
+    body = (_company_data_script(company_data)
+            + _nav(ctx) + hero + process + about + careers + contact + _footer(ctx))
     html = _page_shell(ctx, body)
 
     domain = info.get("domain", "site")
