@@ -777,6 +777,101 @@ def generate_job_description(info: dict) -> str:
     return "\n\n".join(parts)
 
 
+def _natural_list(items) -> str:
+    items = [str(i) for i in items if str(i).strip()]
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
+def generate_appeal(info: dict) -> str:
+    """Plain-text Indeed reinstatement appeal. Human-like and unique each run,
+    built from the site's embedded company-data. Omits missing posting facts."""
+    company = info.get("company_name", "our company")
+    domain = info.get("domain", "")
+    city_state = info.get("city_state", "")
+    city_only = city_state.split(",")[0].strip() if "," in city_state else city_state
+    owner = info.get("owner_name") or _resolve_owner_name(info.get("email", ""), domain)
+    job_title = info.get("job_title", "CDL-A Truck Driver")
+    pay_range = info.get("pay_range", "")
+    home_time = info.get("home_time", "")
+    min_exp = info.get("min_experience", "")
+    routes_type = info.get("routes_type", "OTR Routes")
+    is_regional = "regional" in routes_type.lower()
+    route_label = "Regional" if is_regional else "OTR"
+    territory = "a focused multi-state region" if is_regional else "the lower 48"
+    perks = info.get("perks", [])
+
+    openings = [
+        f"My name is {owner} and I run {company} out of {city_only}.",
+        f"I'm {owner}, the owner of {company} here in {city_only}.",
+        f"This is {owner} from {company} — we're a carrier based in {city_only}.",
+        f"My name's {owner} and I own and operate {company} in {city_only}.",
+        f"I'm {owner}, and I handle the day-to-day at {company} out of {city_only}.",
+    ]
+    nature = [
+        f"We're a small {route_label.lower()} dry van carrier covering {territory}.",
+        f"We run {route_label} dry van freight across {territory} — nothing fancy, just steady work.",
+        f"We're a {route_label.lower()} carrier hauling dry van across {territory} with our own trucks.",
+        f"We do {route_label} dry van runs across {territory}.",
+    ]
+    intros = [
+        "I'm writing to appeal a flagged posting on our account.",
+        "I'm reaching out to appeal a posting that got paused on our account.",
+        "I wanted to follow up on a posting of ours that was flagged.",
+    ]
+
+    job_bits = []
+    if pay_range:
+        job_bits.append(f"The job we listed is a {job_title} paying {pay_range}.")
+    else:
+        job_bits.append(f"The job we listed is a {job_title}.")
+    if home_time:
+        job_bits.append(f"Home time is {home_time}.")
+    if min_exp:
+        job_bits.append(f"We ask for {min_exp} of CDL-A experience.")
+    if perks:
+        job_bits.append("We offer " + _natural_list(perks[:6]) + ".")
+    job_block = " ".join(job_bits)
+
+    legitimacy = [
+        "I handle the hiring myself, so every application comes straight to me.",
+        "There's no agency or third party involved — it's just us looking for a driver.",
+        "We posted because we genuinely need a driver, plain and simple.",
+        "Nothing about the posting is misleading; it's a real job at a real company.",
+        "We're a small operation, and every hire matters to us.",
+        "I'm the one reviewing applications and making the calls.",
+    ]
+    beats = " ".join(random.sample(legitimacy, k=random.randint(2, 3)))
+
+    asks = [
+        "I'd really appreciate it if you could take another look and reinstate the posting.",
+        "I'd be grateful if this could be reviewed and put back up.",
+        "Please take another look — I'd love to get this posting back online.",
+        "I'm hoping you can review this and reinstate our access.",
+    ]
+    if domain:
+        closes = [
+            f"You can verify everything about us at {domain}, and I'm happy to send over any documents you need.",
+            f"Everything checks out on our site at {domain}, and I can provide whatever paperwork helps.",
+            f"Our site {domain} has all our company details, and I'll gladly share documents to confirm we're legitimate.",
+        ]
+    else:
+        closes = [
+            "I'm happy to send over any documents you need to verify us.",
+            "I can provide whatever paperwork helps verify us.",
+        ]
+
+    p1 = " ".join([random.choice(openings), random.choice(nature), random.choice(intros)])
+    p3 = " ".join([random.choice(asks), random.choice(closes)])
+    paragraphs = [p1, job_block, beats, p3] if job_block else [p1, beats, p3]
+    return "\n\n".join(p for p in paragraphs if p)
+
+
 def _hex_to_rgb(hex_color: str) -> str:
     """Convert #RRGGBB to 'R,G,B' string for use in rgba()."""
     h = hex_color.lstrip("#")
