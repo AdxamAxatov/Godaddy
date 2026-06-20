@@ -691,6 +691,7 @@ pending_autossl = {}  # chat_id -> {step, domain}
 
 # Remove domain flow state
 pending_remove_domain = {}  # chat_id -> {step, domain}
+pending_appeal = {}  # chat_id -> {step}
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # BOT HANDLERS
@@ -709,7 +710,8 @@ def handle_message(chat_id, text, message_id=None):
                 "• /setup — deploy a website\n"
                 "• /generate — generate website + job description\n"
                 "• /run\\_autossl — run AutoSSL for a domain\n"
-                "• /remove\\_domain — remove a domain from hosting")
+                "• /remove\\_domain — remove a domain from hosting\n"
+                "• /appeal — generate an Indeed reinstatement appeal")
         return
 
     # Command: /cancel — cancel any active flow
@@ -742,6 +744,9 @@ def handle_message(chat_id, text, message_id=None):
             cancelled = True
         if chat_id in _pending_slot_recovery:
             del _pending_slot_recovery[chat_id]
+            cancelled = True
+        if chat_id in pending_appeal:
+            del pending_appeal[chat_id]
             cancelled = True
         tg_send(chat_id, "🚫 Cancelled." if cancelled else "Nothing to cancel.")
         return
@@ -977,7 +982,24 @@ def handle_message(chat_id, text, message_id=None):
             _start_remove_domain(chat_id, domain)
             return
 
-    tg_send(chat_id, "⚠️ Unknown command. Use `/buy`, `/setup`, `/email`, `/generate`, `/run_autossl`, `/remove_domain`, or `/start`.")
+    # Command: /appeal — generate an Indeed reinstatement appeal from a site URL
+    if text == "/appeal" or text.startswith("/appeal "):
+        url = raw_text.split(" ", 1)[1].strip() if " " in raw_text else ""
+        if url:
+            pending_appeal.pop(chat_id, None)
+            _start_appeal(chat_id, url)
+        else:
+            pending_appeal[chat_id] = {"step": "awaiting_url"}
+            tg_send(chat_id, "🧾 *Indeed Appeal*\n\nSend your deployed website link, "
+                    "e.g. `https://yourcompany.com`.")
+        return
+
+    if chat_id in pending_appeal:
+        pending_appeal.pop(chat_id, None)
+        _start_appeal(chat_id, raw_text.strip())
+        return
+
+    tg_send(chat_id, "⚠️ Unknown command. Use `/setup`, `/generate`, `/appeal`, `/run_autossl`, `/remove_domain`, or `/start`.")
 
 
 def _start_domain_purchase(chat_id, domain, account_idx=None):
@@ -1919,6 +1941,32 @@ def _offer_free_slot(chat_id, account_idx, retry_ctx):
             reply_markup={"inline_keyboard": buttons})
 
 
+def _start_appeal(chat_id, url):
+    """Generate an Indeed reinstatement appeal from a deployed site URL and send
+    it as a .txt document (never a Markdown message)."""
+    from website_generator import generate_appeal
+    tg_send(chat_id, "⏳ Reading your site and writing the appeal...")
+    data, partial = _fetch_company_data(url)
+    if not data:
+        tg_send(chat_id, "🔴 Couldn't read company info from that link.\n"
+                "Make sure it's the deployed site URL, e.g. `https://yourcompany.com`.")
+        return
+    appeal = generate_appeal(data)
+    safe = (data.get("domain") or "appeal").replace(".", "_")
+    path = os.path.join(tempfile.gettempdir(), f"{safe}_appeal.txt")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(appeal)
+    tg_send_document(chat_id, path,
+                     caption="📋 Indeed appeal — paste into the *Additional information* box.")
+    if partial:
+        tg_send(chat_id, "⚠️ That's an older site with no embedded job data, so pay / home "
+                "time / experience were left out — add them before submitting.")
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def _fetch_company_data(url):
     """Fetch a deployed site and return (company_data, partial). Reads the
     embedded company-data JSON when present (partial=False); else falls back to
@@ -2425,6 +2473,7 @@ def tg_set_commands():
         {"command": "generate", "description": "Generate website + job description"},
         {"command": "run_autossl", "description": "Run AutoSSL for a domain"},
         {"command": "remove_domain", "description": "Remove a domain from hosting"},
+        {"command": "appeal", "description": "Generate an Indeed reinstatement appeal"},
         {"command": "cancel", "description": "Cancel current operation"},
         {"command": "users", "description": "List approved users (admin)"},
         {"command": "revoke", "description": "Revoke user access (admin)"},
