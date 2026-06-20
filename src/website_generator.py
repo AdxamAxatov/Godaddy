@@ -5,12 +5,38 @@ Also generates an Indeed job description (markdown).
 """
 
 import json
+import re
 import random
 import os
 import shutil
 import zipfile
 import tempfile
 from pathlib import Path
+
+# ── Owner-name resolution (for Indeed appeals) ─────────
+_GENERIC_MAILBOXES = {
+    "info", "sales", "dispatch", "hr", "jobs", "contact", "office", "careers",
+    "admin", "support", "recruiting", "drive", "driving", "apply", "hiring", "team",
+}
+_OWNER_FIRST_NAMES = [
+    "Lorna", "Marcus", "Dana", "Priya", "Hector", "Renee", "Curtis", "Yolanda",
+    "Devin", "Tanya", "Roy", "Camille", "Brett", "Nadia", "Glenn", "Shauna",
+    "Andre", "Marisol", "Keith", "Bianca", "Dwayne", "Allison", "Hassan", "Gloria",
+]
+
+
+def _resolve_owner_name(email: str, domain: str) -> str:
+    """Owner first name for the appeal. A personal email local-part becomes the
+    name; a generic mailbox (info@, sales@, ...) or no email falls back to a
+    plausible name seeded by the domain so it's stable per company. Uses a
+    private RNG — never touches the global random state."""
+    local = email.split("@", 1)[0] if email and "@" in email else ""
+    cleaned = re.sub(r"[^a-zA-Z]", "", local)
+    if cleaned and cleaned.lower() not in _GENERIC_MAILBOXES:
+        return cleaned[:1].upper() + cleaned[1:].lower()
+    seed = (domain or local or "carrier").lower()
+    return random.Random(seed).choice(_OWNER_FIRST_NAMES)
+
 
 # ── Stock image pools ──────────────────────────────────
 _ASSETS_DIR = Path(__file__).parent.parent / "assets" / "stock_images"
