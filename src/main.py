@@ -1919,6 +1919,38 @@ def _offer_free_slot(chat_id, account_idx, retry_ctx):
             reply_markup={"inline_keyboard": buttons})
 
 
+def _fetch_company_data(url):
+    """Fetch a deployed site and return (company_data, partial). Reads the
+    embedded company-data JSON when present (partial=False); else falls back to
+    a domain->CSV lookup for name/address (partial=True, job specifics absent);
+    else (None, False)."""
+    from website_generator import extract_company_data
+    u = (url or "").strip()
+    if not u.startswith(("http://", "https://")):
+        u = "https://" + u
+    html = None
+    for verify in (True, False):
+        try:
+            html = _http("GET", u, timeout=20, verify=verify).text
+            break
+        except Exception as e:
+            log.warning(f"appeal fetch (verify={verify}) failed: {e}")
+    if html:
+        data = extract_company_data(html)
+        if data:
+            return data, False
+    domain = u.split("//", 1)[-1].split("/", 1)[0]
+    matches = company_lookup.lookup(domain)
+    if len(matches) == 1:
+        m = matches[0]
+        return {
+            "company_name": m["legal_name"], "address": m.get("address", ""),
+            "city_state": m.get("city_state", ""), "domain": domain,
+            "owner_name": "", "perks": [],
+        }, True
+    return None, False
+
+
 def _deploy_to_cpanel(chat_id, domain, zip_path, account_idx):
     """Create the domain, upload + extract the zip, delete the server-side zip.
 
