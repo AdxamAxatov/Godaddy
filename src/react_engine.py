@@ -30,7 +30,7 @@ import colorsys
 import json
 import random
 
-from studio_engine import _build_data, _company_data, _ICON_PATHS
+from studio_engine import _build_data, _company_data, _ICON_PATHS, _fmt
 from website_generator import _company_data_script
 
 
@@ -200,27 +200,27 @@ PRESETS = [
     {"id": "press", "label": "editorial magazine", "fonts": "serif",
      "v": {"nav": "rule", "hero": "editorial", "stats": "ledger", "services": "list",
            "process": "numbered", "showcase": "frame", "testimonials": "pull"},
-     "order": ["stats", "about", "services", "showcase", "process", "testimonials"]},
+     "order": ["services", "coverage", "stats", "about", "showcase", "careers", "process", "testimonials"]},
     {"id": "lumen", "label": "luxury minimal", "fonts": "serif",
      "v": {"nav": "solid", "hero": "split", "stats": "ledger", "services": "accordion",
            "process": "timeline", "showcase": "marquee", "testimonials": "pull"},
-     "order": ["about", "stats", "services", "showcase", "process", "testimonials"]},
+     "order": ["about", "services", "coverage", "stats", "showcase", "careers", "process", "testimonials"]},
     {"id": "apex", "label": "automotive premium", "fonts": "display",
      "v": {"nav": "solid", "hero": "cinematic", "stats": "strip", "services": "list",
            "process": "timeline", "showcase": "grid", "testimonials": "pull"},
-     "order": ["stats", "showcase", "services", "about", "process", "testimonials"]},
+     "order": ["services", "showcase", "coverage", "stats", "about", "careers", "process", "testimonials"]},
     {"id": "nebula", "label": "futuristic enterprise", "fonts": "grotesk",
      "v": {"nav": "floating", "hero": "centered", "stats": "strip", "services": "accordion",
            "process": "timeline", "showcase": "grid", "testimonials": "cards"},
-     "order": ["stats", "services", "showcase", "about", "process", "testimonials"]},
+     "order": ["services", "coverage", "stats", "about", "showcase", "careers", "process", "testimonials"]},
     {"id": "atlas", "label": "modern SaaS", "fonts": "grotesk",
      "v": {"nav": "floating", "hero": "centered", "stats": "strip", "services": "list",
            "process": "numbered", "showcase": "grid", "testimonials": "cards"},
-     "order": ["stats", "services", "about", "showcase", "process", "testimonials"]},
+     "order": ["services", "stats", "coverage", "about", "showcase", "careers", "process", "testimonials"]},
     {"id": "forge", "label": "dark industrial", "fonts": "display",
      "v": {"nav": "rule", "hero": "editorial", "stats": "ledger", "services": "list",
            "process": "numbered", "showcase": "frame", "testimonials": "cards"},
-     "order": ["stats", "services", "showcase", "about", "process", "testimonials"]},
+     "order": ["services", "coverage", "showcase", "stats", "about", "careers", "process", "testimonials"]},
 ]
 
 _FONTS = {
@@ -267,6 +267,111 @@ _SHOWCASE = [
     ("Real home time", "Back when we promise"),
 ]
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Carrier content — the pivot: make the site read as a real operating freight
+# carrier (broker-credible) that ALSO recruits drivers. Soft credibility signals
+# only — never a DOT/MC number a broker could fail to find in FMCSA.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# extra line-icons for freight service lines (merged into _ICON_PATHS at build)
+_CARRIER_ICONS = {
+    "box":     '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4"/><path d="M12 11v10"/>',
+    "snow":    '<path d="M12 2v20M4 6l16 12M20 6L4 18"/><path d="M9 4l3 2 3-2M9 20l3-2 3 2"/>',
+    "layers":  '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
+    "pin":     '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+    "headset": '<path d="M4 13a8 8 0 0 1 16 0"/><path d="M4 13v3a2 2 0 0 0 2 2h1v-6H6a2 2 0 0 0-2 2z"/><path d="M20 13v3a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2z"/>',
+    "gauge":   '<path d="M12 13l5-3"/><path d="M3.5 17a9 9 0 1 1 17 0"/><circle cx="12" cy="13" r="1.5"/>',
+    "check":   '<path d="M20 6L9 17l-5-5"/>',
+}
+
+# freight service lines (pick 6) — what a real carrier sells to shippers
+_FREIGHT_SERVICES = [
+    ("box", "Dry Van", "Our core service — secure, weather-protected trailers for general palletized and packaged freight on dependable schedules."),
+    ("snow", "Refrigerated", "Temperature-controlled reefer capacity for food, beverage and other perishable freight, monitored end to end."),
+    ("layers", "Flatbed & Step-Deck", "Open-deck capacity for building materials, machinery and oversized loads, secured to spec by experienced drivers."),
+    ("route", "Dedicated Lanes", "Committed equipment and drivers on your recurring lanes for consistent transit times and capacity you can plan around."),
+    ("bolt", "Expedited & Team", "Time-critical freight moved with team drivers and direct routing when a load absolutely has to be there."),
+    ("truck", "Intermodal & Drayage", "Port, rail and container drayage that bridges the first and last mile of your intermodal moves."),
+    ("chart", "LTL & Partial", "Cost-efficient less-than-truckload and partial options that get smaller shipments moving without paying for empty space."),
+    ("clock", "Just-in-Time", "Scheduled, appointment-based delivery that keeps production lines and retail shelves supplied on time."),
+    ("shield", "Warehousing & 3PL", "Short-term storage, cross-docking and managed transportation that extend your supply chain beyond the trailer."),
+]
+
+# coverage / network regions (pick 4-5) — soft, no terminal addresses
+_COVERAGE_REGIONS = [
+    ("Southeast & Gulf", "Atlanta, Dallas and the I-10/I-75 corridors"),
+    ("Midwest & Great Lakes", "Chicago, Columbus and the manufacturing belt"),
+    ("Northeast Corridor", "I-95 metro markets from DC to Boston"),
+    ("Texas Triangle", "Dallas, Houston and San Antonio freight"),
+    ("Mountain & West", "Denver, Salt Lake and the I-80 run"),
+    ("West Coast", "California, the Pacific Northwest and port drayage"),
+    ("Plains & Central", "Kansas City, Omaha and cross-country OTR"),
+]
+
+# about / safety soft-signal points — credibility without lookup-able numbers
+_SAFETY_POINTS = [
+    "Fully licensed, bonded & insured",
+    "Late-model, regularly inspected fleet",
+    "Safety-first culture & ongoing driver training",
+    "Real-time tracking & 24/7 dispatch",
+    "Experienced operations & compliance team",
+    "Proactive preventive-maintenance program",
+    "Cargo & liability coverage on every load",
+    "Hours-of-service & ELD compliant",
+]
+
+# carrier-first hero copy (company as a freight carrier, with a hiring hook)
+_CARRIER_HEADLINES = [
+    "Freight that moves\non time. Every time.",
+    "Your freight.\nOur commitment.",
+    "Reliable capacity.\nReal accountability.",
+    "Moving freight,\nmile by mile.",
+    "Driven to deliver.\nBuilt on safety.",
+]
+_CARRIER_SUBHEADS = [
+    "{company} is a {city}-based motor carrier moving dry van, refrigerated and specialized freight across {coverageArea} — backed by a modern fleet and a dispatch team that answers the phone.",
+    "From a single lane to a dedicated fleet, {company} delivers dependable capacity, on-time transit and the communication shippers actually want.",
+    "Licensed, insured and built on safety, {company} keeps freight moving across {coverageArea} with newer equipment and experienced professional drivers.",
+    "{company} pairs asset-based capacity with real accountability — so your freight is covered, tracked and delivered when we say it will be.",
+]
+_CARRIER_KICKERS = [
+    "Freight & Logistics", "Asset-Based Motor Carrier", "{cityState}",
+    "Licensed & Insured Carrier", "Now Serving {routes}",
+]
+_CARRIER_HERO_MIX = [
+    {"lead": "Freight that moves", "accent": "on time"},
+    {"lead": "Capacity you can", "accent": "count on"},
+    {"lead": "Your freight,", "accent": "delivered"},
+    {"lead": "Built on safety,", "accent": "driven to deliver"},
+]
+_CARRIER_ABOUT_TITLES = [
+    "A carrier built on accountability",
+    "Freight handled the right way",
+    "The carrier behind your freight",
+    "Capacity, safety and real communication",
+]
+_CARRIER_ABOUT_P1 = [
+    "{company} was built by people who understand freight. We run a modern, well-maintained fleet and treat every shipment — and every driver — like it matters.",
+    "Out of {cityState}, {company} keeps freight moving with safety-first operations, real-time tracking and a dispatch team available around the clock.",
+    "From a single committed lane to a dedicated fleet, {company} delivers the dependable capacity and on-time transit your supply chain depends on.",
+]
+_CARRIER_ABOUT_P2 = [
+    "Licensed, bonded and fully insured, we pair asset-based capacity with the kind of communication that turns a vendor into a partner.",
+    "Our drivers stay because we invest in equipment, safety and pay — and that consistency is exactly what our shippers feel on every load.",
+    "No black boxes and no runaround: clear updates, proactive maintenance, and freight that arrives when we promise it will.",
+]
+_CARRIER_CTA_TITLES = [
+    "Let's keep your freight moving",
+    "Ready to put us on your lanes?",
+    "Drive with us or ship with us",
+    "Get capacity you can count on",
+]
+_CARRIER_CTA_SUBS = [
+    "Shippers: tell us about your freight and we'll get back to you with capacity. Drivers: apply below and a recruiter will call within one business day.",
+    "Whether you're moving freight or looking to drive it, reach out — a real person will get back to you fast.",
+    "From your first load to your first mile, {company} is ready when you are. Send us a note to get started.",
+]
+
 
 def _build_payload(info):
     d = _build_data(info)
@@ -280,6 +385,39 @@ def _build_payload(info):
     showcase = [{"img": imgs[i], "title": _SHOWCASE[i][0], "sub": _SHOWCASE[i][1]} for i in range(4)]
     mono = "".join(w[0] for w in d["short"].split()[:2]).upper() or d["short"][:2].upper()
 
+    # ── carrier framing: company as a real freight carrier that also recruits ──
+    regional = "regional" in d["routes_type"].lower()
+    coverage_area = "a multi-state regional network" if regional else "all 48 states"
+    fmt = dict(d, coverageArea=coverage_area, cityState=d["city_state"])
+
+    freight_pool = _FREIGHT_SERVICES[:]; random.shuffle(freight_pool)
+    freight = [{"icon": ic, "title": t, "desc": de} for ic, t, de in freight_pool[:6]]
+
+    regions_pool = _COVERAGE_REGIONS[:]; random.shuffle(regions_pool)
+    regions = [{"name": n, "note": note} for n, note in regions_pool[:(4 if regional else 5)]]
+    coverage_stats = [
+        {"v": d["routes"], "l": "Coverage"}, {"v": "98%", "l": "On-Time Delivery"},
+        {"v": "24/7", "l": "Dispatch & Tracking"}, {"v": "100%", "l": "No-Touch Freight"},
+    ]
+    safety_pool = _SAFETY_POINTS[:]; random.shuffle(safety_pool)
+    safety = safety_pool[:6]
+
+    # carrier-first hero / about / cta copy (overrides the recruiting-only copy)
+    headline = _fmt(random.choice(_CARRIER_HEADLINES), fmt)
+    subhead = _fmt(random.choice(_CARRIER_SUBHEADS), fmt)
+    kicker = _fmt(random.choice(_CARRIER_KICKERS), fmt)
+    hero_mix = random.choice(_CARRIER_HERO_MIX)
+    about_title = _fmt(random.choice(_CARRIER_ABOUT_TITLES), fmt)
+    about_p1 = _fmt(random.choice(_CARRIER_ABOUT_P1), fmt)
+    about_p2 = _fmt(random.choice(_CARRIER_ABOUT_P2), fmt)
+    cta_title = _fmt(random.choice(_CARRIER_CTA_TITLES), fmt)
+    cta_sub = _fmt(random.choice(_CARRIER_CTA_SUBS), fmt)
+
+    nav = [("Services", "#services"), ("Coverage", "#coverage"),
+           ("About", "#about"), ("Careers", "#careers"), ("Contact", "#contact")]
+
+    icons = dict(_ICON_PATHS); icons.update(_CARRIER_ICONS)
+
     data = {
         "company": d["company"], "short": d["short"], "logoMain": d["logo_main"],
         "logoAccent": d["logo_accent"], "monogram": mono, "domain": d["domain"],
@@ -287,19 +425,23 @@ def _build_payload(info):
         "state": d["state"], "year": d["year"], "jobTitle": d["job_title"],
         "pay": d["pay_range"], "homeTime": d["home_time"], "homeShort": d["home_time_short"],
         "minExp": d["min_experience"], "routes": d["routes"], "routesType": d["routes_type"],
-        "headline": d["headline"], "subhead": d["subhead"], "kicker": d["kicker"],
-        "aboutTitle": d["about_title"], "aboutP1": d["about_p1"], "aboutP2": d["about_p2"],
-        "ctaTitle": d["cta_title"], "ctaSub": d["cta_sub"],
-        "nav": [{"label": t, "href": h} for t, h in d["nav"]],
+        "coverageArea": coverage_area,
+        "headline": headline, "subhead": subhead, "kicker": kicker,
+        "aboutTitle": about_title, "aboutP1": about_p1, "aboutP2": about_p2,
+        "ctaTitle": cta_title, "ctaSub": cta_sub,
+        "nav": [{"label": t, "href": h} for t, h in nav],
         "stats": [{"v": v, "l": l} for v, l in d["stats"]],
-        "services": [{"icon": ic, "title": t, "desc": de} for ic, t, de in d["services"]],
+        "freight": freight,
+        "coverage": {"regions": regions, "stats": coverage_stats},
+        "safety": safety,
+        "benefits": [{"icon": ic, "title": t, "desc": de} for ic, t, de in d["services"]],
         "process": [{"title": t, "desc": de} for t, de in d["process"]],
         "testimonials": [{"q": q, "n": n, "r": r} for q, n, r in d["testimonials"]],
         "perks": d["perks"], "showcase": showcase,
         "heroMix": hero_mix,
         "studio": {"id": preset["id"], "label": preset["label"], "variants": preset["v"],
                    "order": preset["order"], "mode": theme["mode"], "fonts": preset["fonts"]},
-        "icons": _ICON_PATHS,
+        "icons": icons,
     }
     return data, d, theme, fh, fb, sf
 
@@ -424,20 +566,20 @@ function Nav() {
     bar = <header className="fixed top-4 inset-x-0 z-50 flex justify-center px-4">
       <nav className={cn("flex items-center gap-7 w-full max-w-5xl rounded-full border px-5 py-2.5 transition-all", sc ? "bg-surface/85 border-border shadow-[0_14px_44px_-18px_rgba(var(--prgb),.4)] backdrop-blur-xl" : "bg-surface/40 border-transparent backdrop-blur-md")}>
         <Logo /><div className="hidden md:flex items-center gap-7 ml-auto">{links}</div>
-        <Button size="sm" className="hidden md:inline-flex" onClick={() => location.href = "#apply"}>Apply</Button>{burger}</nav></header>;
+        <Button size="sm" className="hidden md:inline-flex" onClick={() => location.href = "#contact"}>Apply</Button>{burger}</nav></header>;
   } else if (V.nav === "rule") {
     bar = <header className={cn("fixed top-0 inset-x-0 z-50 transition-all", sc ? "bg-bg/90 backdrop-blur-xl" : "")}>
       <div className="mx-auto max-w-6xl px-6 h-[68px] flex items-center justify-between border-b border-border/0" style={{ borderColor: sc ? "var(--border)" : "transparent" }}>
-        <Logo /><nav className="hidden md:flex items-center gap-8">{links}<a href="#apply" className="text-sm font-semibold text-primary">Apply →</a></nav>{burger}</div></header>;
+        <Logo /><nav className="hidden md:flex items-center gap-8">{links}<a href="#contact" className="text-sm font-semibold text-primary">Apply →</a></nav>{burger}</div></header>;
   } else {
     bar = <header className={cn("fixed top-0 inset-x-0 z-50 transition-all", sc ? "bg-bg/85 backdrop-blur-xl border-b border-border" : "border-b border-transparent")}>
       <div className="mx-auto max-w-6xl px-6 h-[72px] flex items-center justify-between"><Logo /><nav className="hidden md:flex items-center gap-8">{links}</nav>
-        <div className="hidden md:flex"><Button size="sm" onClick={() => location.href = "#apply"}>Apply Now</Button></div>{burger}</div></header>;
+        <div className="hidden md:flex"><Button size="sm" onClick={() => location.href = "#contact"}>Apply Now</Button></div>{burger}</div></header>;
   }
   return <>{bar}<AnimatePresence>{open && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
     className="md:hidden fixed inset-0 z-40 bg-bg/97 backdrop-blur-xl flex flex-col items-center justify-center gap-7">
     {D.nav.map(n => <a key={n.href} href={n.href} onClick={() => setOpen(false)} className="font-heading text-2xl font-bold">{n.label}</a>)}
-    <Button onClick={() => { setOpen(false); location.href = "#apply"; }}>Apply Now</Button></motion.div>}</AnimatePresence></>;
+    <Button onClick={() => { setOpen(false); location.href = "#contact"; }}>Apply Now</Button></motion.div>}</AnimatePresence></>;
 }
 
 /* ===== HERO ===== */
@@ -455,8 +597,8 @@ function FramePanel({ src, alt }) {
 }
 function HeroCTA() {
   return <div className="flex flex-wrap items-center gap-x-7 gap-y-4">
-    <Magnetic><Button size="lg" onClick={() => location.href = "#apply"}>Start your application <Icon name="route" className="w-5 h-5" /></Button></Magnetic>
-    <a href="#why" className="group inline-flex items-center gap-2 font-semibold text-text">Why {D.short}<span className="transition-transform group-hover:translate-x-1">→</span></a>
+    <Magnetic><Button size="lg" onClick={() => location.href = "#contact"}>Start your application <Icon name="route" className="w-5 h-5" /></Button></Magnetic>
+    <a href="#services" className="group inline-flex items-center gap-2 font-semibold text-text">Our services<span className="transition-transform group-hover:translate-x-1">→</span></a>
   </div>;
 }
 function Hero() {
@@ -474,8 +616,8 @@ function Hero() {
         <Reveal delay={0.2}><p className="text-muted text-lg md:text-xl mt-7 max-w-2xl mx-auto leading-relaxed">{D.subhead}</p></Reveal>
         <Reveal delay={0.3}><div className="mt-10 flex flex-col items-center gap-4">
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
-            <Magnetic><Button size="lg" className="rounded-full" onClick={() => location.href = "#apply"}>Start your application <Icon name="route" className="w-5 h-5" /></Button></Magnetic>
-            <a href="#why" className="group inline-flex items-center gap-2 font-semibold text-text">See why drivers stay <span className="transition-transform group-hover:translate-x-1">→</span></a>
+            <Magnetic><Button size="lg" className="rounded-full" onClick={() => location.href = "#contact"}>Start your application <Icon name="route" className="w-5 h-5" /></Button></Magnetic>
+            <a href="#services" className="group inline-flex items-center gap-2 font-semibold text-text">Explore our services <span className="transition-transform group-hover:translate-x-1">→</span></a>
           </div>
           <div className="flex items-center gap-2.5 text-sm text-muted"><span className="text-primary tracking-[0.2em]">★★★★★</span>No obligation · Apply in under 2 minutes</div></div></Reveal>
         <Reveal delay={0.4} className="mt-16"><FramePanel src={D.showcase[0].img} alt={D.company} /></Reveal>
@@ -492,7 +634,7 @@ function Hero() {
           <Reveal delay={0.2} className="max-w-xl text-white/80 text-lg leading-relaxed">{D.subhead}</Reveal>
           <Reveal delay={0.3}><HeroCTA /></Reveal></div>
         <Reveal delay={0.4}><div className="flex items-center gap-3 mt-9 text-white/75 text-sm">
-          <span className="text-primary tracking-[0.2em]">★★★★★</span>Trusted by professional drivers · USDOT-certified carrier · {D.routes} coverage</div></Reveal>
+          <span className="text-primary tracking-[0.2em]">★★★★★</span>Licensed &amp; insured · {D.routes} coverage · On-time, every lane</div></Reveal>
       </div></section>;
   }
   if (v === "split") {
@@ -531,7 +673,7 @@ function Hero() {
 
 /* ===== TICKER ===== */
 function Ticker() {
-  const items = [...D.perks, "Weekly Direct Deposit", "USDOT Certified", "No-Touch Freight"];
+  const items = [...D.freight.map(f => f.title), "Licensed & Insured", "On-Time Freight", "24/7 Dispatch"];
   const row = items.flatMap((p, i) => [<span key={"t" + i} className="font-heading font-semibold text-[1.05rem]">{p}</span>,
     <span key={"d" + i} className="text-primary">✦</span>]);
   return <div className="border-y border-border py-5 overflow-hidden bg-surface-2/40 mask-fade">
@@ -557,49 +699,84 @@ function Stats() {
   </Stagger></div></Section>;
 }
 
-/* ===== SERVICES ===== */
-function ServicesList({ alt }) {
-  return <Section id="services" alt={alt}><div className="mx-auto max-w-6xl px-6 grid md:grid-cols-[280px_1fr] gap-12">
-    <div className="md:sticky md:top-28 self-start"><Label n="">Benefits</Label>
+/* ===== SERVICES (freight lines — credibility for shippers/brokers) ===== */
+function Freight() {
+  const alt = D.studio.order.indexOf("services") % 2 === 0;
+  return <Section id="services" alt={alt}><div className="mx-auto max-w-6xl px-6">
+    <Head n="" kicker="What we haul" title={"Freight services built around your supply chain"}
+      desc={D.short + " moves dry van, refrigerated and specialized freight across " + D.coverageArea + " — with the equipment and capacity to match the load."} />
+    <Stagger className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">{D.freight.map((s, i) => <Item key={i}>
+      <Card className="group h-full p-7 transition-all hover:-translate-y-1 hover:shadow-xl">
+        <div className="grid place-items-center w-12 h-12 rounded-[var(--radius)] bg-primary/10 text-primary"><Icon name={s.icon} className="w-6 h-6" /></div>
+        <h3 className="font-heading text-xl font-bold tracking-tight mt-5">{s.title}</h3>
+        <p className="text-muted mt-2.5 leading-relaxed text-[0.95rem]">{s.desc}</p></Card></Item>)}
+    </Stagger></div></Section>;
+}
+
+/* ===== COVERAGE (network / lanes) ===== */
+function Coverage() {
+  const alt = D.studio.order.indexOf("coverage") % 2 === 0;
+  return <Section id="coverage" alt={alt}><div className="mx-auto max-w-6xl px-6 grid md:grid-cols-2 gap-14 items-center">
+    <div><Reveal><Label>Coverage</Label></Reveal>
+      <Reveal delay={0.06}><h2 className={cn("font-heading font-bold tracking-[-0.02em] mt-5 leading-[1.05]", SERIF ? "text-[clamp(2rem,3.8vw,3rem)]" : "text-[clamp(1.9rem,3.4vw,2.7rem)]")}>A network that reaches {D.routes}</h2></Reveal>
+      <Reveal delay={0.12}><p className="text-muted mt-6 leading-relaxed text-[1.05rem]">From {D.cityState}, {D.company} runs freight across {D.coverageArea} — built for predictable transit and real, available capacity.</p></Reveal>
+      <Stagger className="mt-8 flex flex-col">{D.coverage.regions.map((r, i) => <Item key={i}>
+        <div className="flex items-start gap-4 py-4 border-t border-border last:border-b">
+          <Icon name="pin" className="w-5 h-5 text-primary mt-0.5 shrink-0" />
+          <div><div className="font-heading font-bold tracking-tight">{r.name}</div><div className="text-muted text-sm mt-0.5">{r.note}</div></div></div></Item>)}
+      </Stagger></div>
+    <Reveal delay={0.1} className="relative">
+      <Img src={D.showcase[2].img} alt={D.company + " coverage"} parallax scrim className="rounded-[calc(var(--radius)+12px)] border border-border aspect-[4/5] shadow-xl" />
+      <div className="absolute left-5 right-5 bottom-5 grid grid-cols-2 gap-3">{D.coverage.stats.slice(0, 2).map((s, i) => <div key={i} className="rounded-[var(--radius)] bg-surface/90 backdrop-blur px-4 py-3 border border-border">
+        <div className="font-heading font-bold text-xl text-primary"><Counter value={s.v} /></div><div className="text-[11px] uppercase tracking-widest text-muted mt-0.5">{s.l}</div></div>)}</div>
+    </Reveal></div></Section>;
+}
+
+/* ===== CAREERS (drivers — kept the slick UI, reframed) ===== */
+function CareersList({ alt }) {
+  return <Section id="careers" alt={alt}><div className="mx-auto max-w-6xl px-6 grid md:grid-cols-[280px_1fr] gap-12">
+    <div className="md:sticky md:top-28 self-start"><Label n="">Careers</Label>
       <h2 className={cn("font-heading font-bold tracking-[-0.02em] mt-5 leading-[1.04]", SERIF ? "text-[clamp(1.9rem,3.4vw,2.8rem)]" : "text-[clamp(1.8rem,3vw,2.5rem)]")}>What it means to drive with {D.short}</h2>
-      <p className="text-muted mt-5 leading-relaxed">Every detail is built to keep you earning, rolling, and home on time.</p></div>
-    <Stagger>{D.services.map((s, i) => <Item key={i}>
+      <p className="text-muted mt-5 leading-relaxed">We're growing our driver team. Every detail is built to keep you earning, rolling, and home on time.</p>
+      <Button className="mt-7" onClick={() => location.href = "#contact"}>Apply to drive</Button></div>
+    <Stagger>{D.benefits.map((s, i) => <Item key={i}>
       <div className="group grid grid-cols-[auto_1fr_auto] gap-6 items-baseline py-7 border-t border-border last:border-b transition-all hover:px-2">
         <span className="font-heading font-bold text-[clamp(1.4rem,2vw,1.9rem)] text-muted/50 group-hover:text-primary transition-colors">{nn(i + 1)}</span>
         <div><h3 className="font-heading text-xl md:text-2xl font-bold tracking-tight">{s.title}</h3><p className="text-muted mt-2 max-w-xl leading-relaxed">{s.desc}</p></div>
         <Icon name={s.icon} className="w-6 h-6 text-primary/40 group-hover:text-primary transition-colors hidden md:block" /></div></Item>)}
     </Stagger></div></Section>;
 }
-function ServicesAccordion({ alt }) {
+function CareersAccordion({ alt }) {
   const [open, setOpen] = useState(0);
-  return <Section id="services" alt={alt}><div className="mx-auto max-w-6xl px-6">
-    <Head n="" kicker="Benefits" title={"Built around the driver"} desc="Everything we do keeps you earning, rolling, and home on time." />
+  return <Section id="careers" alt={alt}><div className="mx-auto max-w-6xl px-6">
+    <Head n="" kicker="Careers" title={"Built around the driver"} desc="We're hiring CDL-A drivers. Everything we do keeps you earning, rolling, and home on time." />
     <div className="grid md:grid-cols-[1fr_.85fr] gap-10 items-start">
-      <div>{D.services.map((s, i) => <div key={i} className="border-t border-border last:border-b">
+      <div>{D.benefits.map((s, i) => <div key={i} className="border-t border-border last:border-b">
         <button onClick={() => setOpen(i)} className="w-full flex items-center gap-5 py-5 text-left">
           <span className={cn("font-heading font-bold text-lg transition-colors", open === i ? "text-primary" : "text-muted/50")}>{nn(i + 1)}</span>
           <span className={cn("font-heading text-xl font-bold tracking-tight transition-colors flex-1", open === i ? "text-text" : "text-muted")}>{s.title}</span>
           <Icon name={s.icon} className={cn("w-5 h-5 transition-colors", open === i ? "text-primary" : "text-muted/40")} /></button>
         <AnimatePresence initial={false}>{open === i && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.4, ease: EASE }} className="overflow-hidden">
-          <p className="text-muted pb-6 pl-10 max-w-md leading-relaxed">{s.desc}</p></motion.div>}</AnimatePresence></div>)}</div>
+          <p className="text-muted pb-6 pl-10 max-w-md leading-relaxed">{s.desc}</p></motion.div>}</AnimatePresence></div>)}
+        <Button className="mt-8" onClick={() => location.href = "#contact"}>Apply to drive</Button></div>
       <div className="md:sticky md:top-28"><AnimatePresence mode="wait"><motion.div key={open} initial={{ opacity: 0, scale: 1.02 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.45, ease: EASE }}>
-        <Img src={D.showcase[open % 4].img} alt={D.services[open].title} className="rounded-[calc(var(--radius)+8px)] border border-border aspect-[5/4]" /></motion.div></AnimatePresence></div>
+        <Img src={D.showcase[open % 4].img} alt={D.benefits[open].title} className="rounded-[calc(var(--radius)+8px)] border border-border aspect-[5/4]" /></motion.div></AnimatePresence></div>
     </div></div></Section>;
 }
-function Services() { const alt = D.studio.order.indexOf("services") % 2 === 0; return V.services === "accordion" ? <ServicesAccordion alt={alt} /> : <ServicesList alt={alt} />; }
+function Careers() { const alt = D.studio.order.indexOf("careers") % 2 === 0; return V.services === "accordion" ? <CareersAccordion alt={alt} /> : <CareersList alt={alt} />; }
 
 /* ===== ABOUT ===== */
 function About() {
   const alt = D.studio.order.indexOf("about") % 2 === 0;
-  return <Section id="why" alt={alt}><div className="mx-auto max-w-6xl px-6 grid md:grid-cols-2 gap-14 items-center">
+  return <Section id="about" alt={alt}><div className="mx-auto max-w-6xl px-6 grid md:grid-cols-2 gap-14 items-center">
     <Reveal className="relative order-2 md:order-1"><Img src={D.showcase[1].img} alt={D.company} parallax className="rounded-[calc(var(--radius)+12px)] border border-border aspect-[4/5] shadow-xl" />
-      <div className="absolute -top-5 -right-5 hidden md:block"><Card className="px-6 py-5 shadow-xl bg-surface"><div className="font-heading font-bold text-3xl text-primary"><Counter value={D.routes} /></div><div className="text-xs text-muted uppercase tracking-widest mt-1">Coverage</div></Card></div></Reveal>
-    <div className="order-1 md:order-2"><Reveal><Label>Why {D.short}</Label></Reveal>
+      <div className="absolute -top-5 -right-5 hidden md:block"><Card className="px-6 py-5 shadow-xl bg-surface"><div className="font-heading font-bold text-2xl text-primary leading-tight">Licensed<br />&amp; Insured</div><div className="text-xs text-muted uppercase tracking-widest mt-1.5">On every load</div></Card></div></Reveal>
+    <div className="order-1 md:order-2"><Reveal><Label>About {D.short}</Label></Reveal>
       <Reveal delay={0.06}><h2 className={cn("font-heading font-bold tracking-[-0.02em] mt-5 leading-[1.05]", SERIF ? "text-[clamp(2rem,3.8vw,3rem)]" : "text-[clamp(1.9rem,3.4vw,2.7rem)]")}>{D.aboutTitle}</h2></Reveal>
       <Reveal delay={0.12}><p className="text-muted mt-6 leading-relaxed text-[1.05rem]">{D.aboutP1}</p></Reveal>
       <Reveal delay={0.16}><p className="text-muted mt-3 leading-relaxed">{D.aboutP2}</p></Reveal>
-      <Stagger className="grid grid-cols-2 gap-x-6 gap-y-3.5 mt-8">{D.perks.slice(0, 6).map((p, i) => <Item key={i}>
-        <div className="flex items-center gap-3 font-medium text-[0.95rem] border-l-2 border-primary/30 pl-3 py-0.5">{p}</div></Item>)}</Stagger>
+      <Stagger className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3.5 mt-8">{D.safety.map((p, i) => <Item key={i}>
+        <div className="flex items-start gap-2.5 font-medium text-[0.95rem]"><Icon name="check" className="w-4 h-4 text-primary mt-1 shrink-0" />{p}</div></Item>)}</Stagger>
     </div></div></Section>;
 }
 
@@ -669,15 +846,16 @@ function Testimonials() {
 /* ===== CTA ===== */
 function CTA() {
   const [sent, setSent] = useState(false);
-  return <section id="apply" className="relative py-24 md:py-32 overflow-hidden"><div className="mx-auto max-w-6xl px-6">
+  return <section id="contact" className="relative py-24 md:py-32 overflow-hidden"><div className="mx-auto max-w-6xl px-6">
     <div className="relative overflow-hidden rounded-[calc(var(--radius)+18px)] border border-border grid md:grid-cols-2 gap-10 p-8 md:p-14 items-center">
       <div className="absolute inset-0 -z-10"><Img src={D.showcase[2].img} alt="" className="w-full h-full" /><div className="absolute inset-0 cta-scrim" /></div>
-      <div className="relative text-white"><Reveal><Label>Apply now</Label></Reveal>
+      <div className="relative text-white"><Reveal><Label>Get in touch</Label></Reveal>
         <Reveal delay={0.06}><h2 className={cn("font-heading font-bold tracking-[-0.02em] mt-5 leading-tight", SERIF ? "text-[clamp(2rem,4vw,3.2rem)]" : "text-[clamp(1.9rem,3.6vw,2.9rem)]")}>{D.ctaTitle}</h2></Reveal>
         <Reveal delay={0.12}><p className="text-white/80 mt-5 leading-relaxed max-w-md">{D.ctaSub}</p></Reveal>
         <Reveal delay={0.18}><div className="flex flex-col gap-3 mt-8 text-sm text-white/85">
-          <span className="flex items-center gap-2.5"><Icon name="check" className="w-4 h-4" />Two-minute application — no obligation</span>
-          <span className="flex items-center gap-2.5"><Icon name="check" className="w-4 h-4" />A real recruiter calls within one business day</span></div></Reveal></div>
+          <span className="flex items-center gap-2.5"><Icon name="check" className="w-4 h-4" />Drivers: a real recruiter calls within one business day</span>
+          <span className="flex items-center gap-2.5"><Icon name="pin" className="w-4 h-4" />Shippers: email <b className="font-semibold">{D.email}</b> to request capacity</span>
+          <span className="flex items-center gap-2.5"><Icon name="home" className="w-4 h-4" />{D.cityState}</span></div></Reveal></div>
       <Reveal delay={0.1}><form className="grid gap-3 bg-surface/95 backdrop-blur p-7 rounded-[calc(var(--radius)+6px)] border border-border" onSubmit={e => { e.preventDefault(); setSent(true); setTimeout(() => setSent(false), 2600); e.target.reset(); }}>
         <input name="name" required placeholder="Full name" className={inputCls} />
         <input name="phone" type="tel" required placeholder="Phone number" className={inputCls} />
@@ -692,9 +870,9 @@ function CTA() {
 function Footer() {
   return <footer className="border-t border-border pt-20 pb-10"><div className="mx-auto max-w-6xl px-6">
     <div className="grid md:grid-cols-[1.5fr_1fr_1fr] gap-10">
-      <div><Logo /><p className="text-muted text-sm mt-5 leading-relaxed max-w-xs">{D.company} — hiring {D.jobTitle}s across {D.cityState}. {D.routesType}, top weekly pay, real home time.</p></div>
-      <div><div className="text-[11px] uppercase tracking-[0.18em] text-muted mb-4">Explore</div><div className="flex flex-col gap-2.5">{D.nav.map(n => <a key={n.href} href={n.href} className="text-sm text-muted hover:text-text transition">{n.label}</a>)}<a href="#apply" className="text-sm text-primary font-semibold">Apply Now →</a></div></div>
-      <div><div className="text-[11px] uppercase tracking-[0.18em] text-muted mb-4">Get in touch</div><div className="text-sm text-muted space-y-1.5"><div>{D.email}</div><div>{D.cityState}</div><div>USDOT Certified Carrier</div></div></div>
+      <div><Logo /><p className="text-muted text-sm mt-5 leading-relaxed max-w-xs">{D.company} — an asset-based motor carrier moving freight across {D.cityState} and {D.coverageArea}. {D.routesType}, modern fleet, real accountability.</p></div>
+      <div><div className="text-[11px] uppercase tracking-[0.18em] text-muted mb-4">Explore</div><div className="flex flex-col gap-2.5">{D.nav.map(n => <a key={n.href} href={n.href} className="text-sm text-muted hover:text-text transition">{n.label}</a>)}<a href="#contact" className="text-sm text-primary font-semibold">Contact us →</a></div></div>
+      <div><div className="text-[11px] uppercase tracking-[0.18em] text-muted mb-4">Get in touch</div><div className="text-sm text-muted space-y-1.5"><div>{D.email}</div><div>{D.cityState}</div><div>Licensed &amp; Insured Carrier</div></div></div>
     </div>
     <div className="mt-16 font-heading font-bold tracking-[-0.04em] leading-none text-[clamp(2.5rem,12vw,9rem)] text-text/[0.06] select-none">{D.short}</div>
     <div className="mt-6 pt-6 border-t border-border flex flex-col md:flex-row justify-between gap-3 text-xs text-muted">
@@ -703,7 +881,7 @@ function Footer() {
   </div></footer>;
 }
 
-const SECTIONS = { stats: Stats, services: Services, about: About, process: Process, showcase: Showcase, testimonials: Testimonials };
+const SECTIONS = { services: Freight, coverage: Coverage, about: About, careers: Careers, stats: Stats, process: Process, showcase: Showcase, testimonials: Testimonials };
 function App() {
   return <><Nav /><Hero /><Ticker />
     {D.studio.order.map((k, i) => { const C = SECTIONS[k]; return C ? <C key={k + i} /> : null; })}
@@ -769,9 +947,10 @@ def _head(data, d, theme, fh, fb, sf):
            + grain)
     return ("<!DOCTYPE html><html lang=\"en\" class=\"grain\"><head><meta charset=\"UTF-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            "<title>" + data["company"] + " — CDL-A Driver Jobs | " + data["cityState"] + "</title>"
-            "<meta name=\"description\" content=\"" + data["company"] + " is hiring CDL-A drivers in "
-            + data["cityState"] + ". " + data["routesType"] + ", top weekly pay, real home time.\">"
+            "<title>" + data["company"] + " — Freight &amp; Logistics | " + data["cityState"] + "</title>"
+            "<meta name=\"description\" content=\"" + data["company"] + " is an asset-based motor carrier in "
+            + data["cityState"] + " moving dry van, refrigerated and specialized freight across " + data["coverageArea"]
+            + ". Licensed, insured and hiring CDL-A drivers.\">"
             "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">"
             "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>"
             "<link href=\"" + font_url + "\" rel=\"stylesheet\">"
