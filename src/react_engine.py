@@ -980,3 +980,69 @@ def render_site(info, studio=None):
         + "</body></html>"
     )
     return _head(data, d, theme, fh, fb, sf) + body, d
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Static prerender — snapshot the client-rendered DOM so crawlers, link-preview
+# bots and no-JS viewers (e.g. Indeed verification, a broker doing "view source")
+# see a fully-formed carrier site instead of an empty #root. The live React /
+# Tailwind / Babel scripts stay in place as progressive enhancement; a real
+# browser simply re-renders on top of the captured markup.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def static_snapshot(html, timeout_ms=20000):
+    """Render `html` in headless Chrome, settle scroll-reveal animations, then
+    bake the rendered #root markup and Tailwind's generated CSS back into the
+    *pristine* original HTML — so crawlers/no-JS viewers get real content while
+    the original (known-good) script ordering still re-renders live in browsers.
+    Returns None on any failure so the caller falls back to the live HTML.
+
+    We deliberately do NOT serialise document.outerHTML: that captures the
+    Babel-injected module scripts and re-mounts React against them, which breaks
+    the import map on reload. Re-injecting into the original markup keeps exactly
+    one import map / one app script, so the page behaves like a fresh first load.
+    """
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel="chrome", headless=True)
+        try:
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            page.set_content(html, wait_until="domcontentloaded", timeout=timeout_ms)
+            # wait for Babel to transpile the JSX and React to mount the app
+            page.wait_for_function(
+                "() => { const r = document.getElementById('root'); return r && r.children.length > 0; }",
+                timeout=timeout_ms,
+            )
+            page.wait_for_timeout(1400)  # let Tailwind inject utilities + fonts settle
+            # scroll through so every whileInView reveal fires, then return to top
+            for y in range(0, 9000, 800):
+                page.evaluate("window.scrollTo(0, %d)" % y)
+                page.wait_for_timeout(70)
+            page.evaluate("window.scrollTo(0, 0)")
+            page.wait_for_timeout(350)
+            # force any element still mid-transition to its visible resting state
+            page.evaluate(
+                "document.querySelectorAll('[style]').forEach(function(e){"
+                "var s=e.style;"
+                "if(s.opacity!==''&&parseFloat(s.opacity)<1)s.opacity='1';"
+                "if(s.transform&&/translate|scale/.test(s.transform))s.transform='none';"
+                "});"
+            )
+            root_html = page.evaluate("document.getElementById('root').innerHTML")
+            # Tailwind Play + framer inject <style> blocks; ours is the only one
+            # carrying the :root design tokens, so keep everything else.
+            extra_css = page.evaluate(
+                "Array.from(document.querySelectorAll('style'))"
+                ".map(function(s){return s.textContent||''})"
+                ".filter(function(c){return c && c.indexOf('--bg:')===-1}).join('\\n')"
+            )
+        finally:
+            browser.close()
+
+    if not root_html or 'id="services"' not in root_html:
+        return None
+    out = html.replace('<div id="root"></div>', '<div id="root">' + root_html + "</div>", 1)
+    if extra_css:
+        out = out.replace("</head>", '<style data-prerender>' + extra_css + "</style></head>", 1)
+    return out

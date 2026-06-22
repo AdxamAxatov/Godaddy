@@ -2260,6 +2260,21 @@ def generate_website_from_blocks(info: dict) -> str:
         log.warning("Studio engine failed (%s); falling back to legacy generator", exc)
         return _legacy_generate_from_blocks(info)
 
+    # Pre-render the client-only React output to static HTML so crawlers,
+    # link-preview bots and no-JS viewers (Indeed verification, broker diligence)
+    # see real content. The live scripts remain, so browsers re-render on top.
+    try:
+        from react_engine import static_snapshot
+        snap = static_snapshot(html)
+        if snap and 'id="services"' in snap and 'id="careers"' in snap:
+            html = snap
+        else:
+            __import__("logging").getLogger("automation").warning(
+                "Static snapshot incomplete; deploying live (client-rendered) HTML")
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        __import__("logging").getLogger("automation").warning(
+            "Static snapshot failed (%s); deploying live (client-rendered) HTML", exc)
+
     domain = info.get("domain", "site")
     tmp_dir  = tempfile.mkdtemp()
     site_dir = os.path.join(tmp_dir, domain.replace(".", "_"))
