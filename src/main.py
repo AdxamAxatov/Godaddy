@@ -1232,12 +1232,25 @@ def _generate_random_job_info(route_choice="random"):
     """Generate random job info for website and job description."""
 
     # ── Job title ──
+    # Indeed de-duplicates primarily on job TITLE + location, so varying the
+    # title across companies is the single biggest defense against postings
+    # getting consolidated/hidden. Titles stay compliant: no ALL-CAPS, emoji,
+    # clickbait, pay claims, or combined roles — and every variant matches the
+    # body facts (dry van, OTR/Regional, company driver). "Dry Van" is always
+    # true; no home-time claims in the title (those would risk a fact mismatch).
     otr_titles = [
         "OTR CDL-A Truck Driver",
         "OTR CDL-A Company Driver",
         "OTR Class A Driver",
         "OTR Company Driver — CDL-A",
         "CDL-A OTR Truck Driver",
+        "CDL-A Over-the-Road Driver",
+        "CDL-A OTR Dry Van Driver",
+        "OTR CDL-A Dry Van Driver",
+        "Class A OTR Company Driver",
+        "CDL-A Driver — OTR Dry Van",
+        "Over-the-Road CDL-A Truck Driver",
+        "OTR CDL-A Driver (Dry Van)",
     ]
     regional_titles = [
         "Regional CDL-A Truck Driver",
@@ -1245,6 +1258,13 @@ def _generate_random_job_info(route_choice="random"):
         "Regional Class A Driver",
         "Regional Company Driver — CDL-A",
         "CDL-A Regional Truck Driver",
+        "CDL-A Regional Dry Van Driver",
+        "Regional CDL-A Dry Van Driver",
+        "Class A Regional Company Driver",
+        "CDL-A Driver — Regional Dry Van",
+        "Regional CDL-A Driver (Dry Van)",
+        "CDL-A Regional Company Driver",
+        "Regional Class A Truck Driver",
     ]
     if route_choice == "otr":
         is_otr = True
