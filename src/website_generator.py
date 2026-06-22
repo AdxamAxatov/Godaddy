@@ -2239,10 +2239,56 @@ def _contact_v3(ctx: dict) -> str:
 
 def generate_website_from_blocks(info: dict) -> str:
     """
-    Generate a trucking company website by randomly combining section blocks.
-    Returns the path to a zip file containing index.html + images/.
+    Generate a premium, never-repeating trucking company website.
 
-    Uses the same info dict as generate_website().
+    Delegates page rendering to the studio engine, which picks one of several
+    fully self-contained "design studios" (each its own CSS, layout, type scale
+    and motion) plus a procedurally generated colour palette — so two
+    generations rarely look alike. Returns the path to a zip containing
+    index.html + images/.
+
+    The embedded breakout-safe company-data <script> is preserved by the studio
+    engine, so /appeal and the CSV-autofill flow keep working. The legacy
+    block-based renderer (`_legacy_generate_from_blocks`) is kept below as a
+    fallback in case the studio engine is unavailable.
+    """
+    try:
+        from react_engine import render_site
+        html, ctx = render_site(info)
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        log = __import__("logging").getLogger("automation")
+        log.warning("Studio engine failed (%s); falling back to legacy generator", exc)
+        return _legacy_generate_from_blocks(info)
+
+    domain = info.get("domain", "site")
+    tmp_dir  = tempfile.mkdtemp()
+    site_dir = os.path.join(tmp_dir, domain.replace(".", "_"))
+    images_dir = os.path.join(site_dir, "images")
+    os.makedirs(images_dir, exist_ok=True)
+
+    with open(os.path.join(site_dir, "index.html"), "w", encoding="utf-8") as f:
+        f.write(html)
+
+    for img_name in {ctx["hero_img"], ctx["about_img"], ctx["about_img2"], ctx["coverage_img"]}:
+        src = _ASSETS_DIR / img_name
+        if src.exists():
+            shutil.copy2(str(src), os.path.join(images_dir, img_name))
+
+    zip_name = f"{domain.replace('.', '_')}_website.zip"
+    zip_path = os.path.join(tmp_dir, zip_name)
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _dirs, files in os.walk(site_dir):
+            for file in files:
+                fp = os.path.join(root, file)
+                zf.write(fp, os.path.relpath(fp, site_dir))
+
+    return zip_path
+
+
+def _legacy_generate_from_blocks(info: dict) -> str:
+    """
+    Legacy block-based generator (original `generate_website_from_blocks`).
+    Kept as a fallback; produces index.html + images/ as a zip.
     """
     color = random.choice(COLOR_SCHEMES)
     font  = random.choice(FONT_PAIRS)
