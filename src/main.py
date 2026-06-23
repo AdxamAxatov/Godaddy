@@ -1977,7 +1977,10 @@ def _start_appeal(chat_id, url):
     with open(path, "w", encoding="utf-8") as f:
         f.write(appeal)
     tg_send_document(chat_id, path,
-                     caption="📋 Indeed appeal — paste into the *Additional information* box.")
+                     caption="📋 Indeed verification response — paste into the *Additional information* box.")
+    tg_send(chat_id, "💡 This text supports your case, but the real unlock is identity "
+            "verification — use the *work email on this domain* (or business documents) "
+            "when Indeed's Verification Center asks. The narrative is unique per company.")
     if partial:
         tg_send(chat_id, "⚠️ That's an older site with no embedded job data, so pay / home "
                 "time / experience were left out — add them before submitting.")
