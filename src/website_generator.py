@@ -882,8 +882,15 @@ def _natural_list(items) -> str:
 
 
 def generate_appeal(info: dict) -> str:
-    """Plain-text Indeed reinstatement appeal. Human-like and unique each run,
-    built from the site's embedded company-data. Omits missing posting facts."""
+    """Plain-text response for Indeed's new-employer "additional information"
+    verification request — a grounded, professional small-business-owner
+    narrative (who we are, what we haul, why we're hiring, the role, how we
+    handle applications, and an offer to verify). Built only from the site's
+    embedded company-data, so it stays consistent with the posting/website and
+    invents no hard facts. Randomized structure/length/order/phrasing so two
+    companies' submissions never read alike (the repeated-boilerplate /
+    "chameleon carrier" pattern is exactly what verification screens for).
+    """
     company = info.get("company_name", "our company")
     domain = info.get("domain", "")
     city_state = info.get("city_state", "")
@@ -897,71 +904,139 @@ def generate_appeal(info: dict) -> str:
     is_regional = "regional" in routes_type.lower()
     route_label = "Regional" if is_regional else "OTR"
     territory = "a focused multi-state region" if is_regional else "the lower 48"
-    perks = info.get("perks", [])
 
-    openings = [
-        f"My name is {owner} and I run {company} out of {city_only}.",
-        f"I'm {owner}, the owner of {company} here in {city_only}.",
-        f"This is {owner} from {company} — we're a carrier based in {city_only}.",
-        f"My name's {owner} and I own and operate {company} in {city_only}.",
-        f"I'm {owner}, and I handle the day-to-day at {company} out of {city_only}.",
-    ]
-    nature = [
-        f"We're a small {route_label.lower()} dry van carrier covering {territory}.",
-        f"We run {route_label} dry van freight across {territory} — nothing fancy, just steady work.",
-        f"We're a {route_label.lower()} carrier hauling dry van across {territory} with our own trucks.",
-        f"We do {route_label} dry van runs across {territory}.",
-    ]
-    intros = [
-        "I'm writing to appeal a flagged posting on our account.",
-        "I'm reaching out to appeal a posting that got paused on our account.",
-        "I wanted to follow up on a posting of ours that was flagged.",
-    ]
+    length = random.choice(["short", "medium", "long"])
+    opt_lo, opt_hi = {"short": (1, 2), "medium": (2, 3), "long": (3, 4)}[length]
 
-    job_bits = []
+    # ── Identity (always first) ──
+    if owner:
+        identity = random.choice([
+            f"My name is {owner} and I own and operate {company}, a trucking company based in {city_only}.",
+            f"I'm {owner}, the owner of {company} here in {city_only}.",
+            f"My name is {owner}. I run {company}, a motor carrier based in {city_only}.",
+            f"I'm {owner}, and I handle the day-to-day at {company} out of {city_only}.",
+            f"This is {owner}, owner of {company}, a carrier operating out of {city_only}.",
+        ])
+    else:
+        identity = random.choice([
+            f"I'm writing on behalf of {company}, a trucking company based in {city_only}.",
+            f"I own and operate {company}, a motor carrier based in {city_only}.",
+            f"This is regarding {company}, a carrier we run out of {city_only}.",
+        ])
+
+    # ── What we do ──
+    whatwedo = random.choice([
+        f"We're an asset-based {route_label.lower()} dry van carrier covering {territory}.",
+        f"We run {route_label} dry van freight across {territory} with our own equipment.",
+        f"{company} hauls dry van freight on {route_label.lower()} lanes across {territory}.",
+        f"We're a {route_label.lower()} carrier moving dry van freight across {territory}.",
+    ])
+
+    # ── Why hiring (grounded — no invented specifics) ──
+    whyhiring = random.choice([
+        "Our freight has been steady, and we need another reliable driver to keep up with it.",
+        "We're adding a seat because demand on our lanes has been consistent.",
+        "We're hiring to cover steady freight and keep our trucks moving.",
+        "We have the freight and the equipment; what we need now is one more dependable driver.",
+        "We're growing carefully and have room for another professional driver.",
+    ])
+
+    # ── The role (always — this request is about the job) ──
+    role_lead = random.choice([
+        f"The position we posted is for a {job_title}.",
+        f"We're hiring for one {job_title} role.",
+        f"The job we listed is a {job_title} opening.",
+        f"We posted a single {job_title} position.",
+    ])
+    role_bits = [role_lead]
     if pay_range:
-        job_bits.append(f"The job we listed is a {job_title} paying {pay_range}.")
-    else:
-        job_bits.append(f"The job we listed is a {job_title}.")
+        role_bits.append(random.choice([
+            f"It pays {pay_range}.", f"The pay is {pay_range}.", f"We're offering {pay_range}.",
+        ]))
     if home_time:
-        job_bits.append(f"Home time is {home_time}.")
+        ht = home_time.rstrip(".")
+        role_bits.append(random.choice([
+            f"{ht}.",
+            f"The schedule is {ht.lower()}.",
+            f"{ht}, so the schedule is predictable.",
+        ]))
     if min_exp:
-        job_bits.append(f"We ask for {min_exp} of CDL-A experience.")
-    if perks:
-        job_bits.append("We offer " + _natural_list(perks[:6]) + ".")
-    job_block = " ".join(job_bits)
+        role_bits.append(random.choice([
+            f"We ask for {min_exp} of verifiable CDL-A experience.",
+            f"The role requires at least {min_exp} of CDL-A experience.",
+        ]))
+    role = " ".join(role_bits)
 
-    legitimacy = [
-        "I handle the hiring myself, so every application comes straight to me.",
-        "There's no agency or third party involved — it's just us looking for a driver.",
-        "We posted because we genuinely need a driver, plain and simple.",
-        "Nothing about the posting is misleading; it's a real job at a real company.",
-        "We're a small operation, and every hire matters to us.",
-        "I'm the one reviewing applications and making the calls.",
-    ]
-    beats = " ".join(random.sample(legitimacy, k=random.randint(2, 3)))
+    # ── How applications are handled (on-platform legitimacy signal) ──
+    howapps = random.choice([
+        "Applications come to me directly through Indeed, and I review each one personally.",
+        "I handle hiring myself — every application comes through Indeed and I follow up with the driver.",
+        "We take applications through Indeed and I personally screen and call qualified drivers.",
+        "All applicants apply on Indeed, and I review and contact them myself.",
+    ])
 
-    asks = [
-        "I'd really appreciate it if you could take another look and reinstate the posting.",
-        "I'd be grateful if this could be reviewed and put back up.",
-        "Please take another look — I'd love to get this posting back online.",
-        "I'm hoping you can review this and reinstate our access.",
-    ]
+    # ── Legitimacy / local presence ──
+    legit = random.choice([
+        f"We're a registered, licensed and insured carrier with a local presence in {city_only}.",
+        "We operate as a fully licensed and insured motor carrier with active authority.",
+        f"We're an established small business in {city_only}, properly registered, licensed and insured.",
+        "This is a real, operating carrier — licensed, insured, and running freight every week.",
+    ])
+
+    # ── Verification offer (maps to what actually unlocks verification) ──
     if domain:
-        closes = [
-            f"You can verify everything about us at {domain}, and I'm happy to send over any documents you need.",
-            f"Everything checks out on our site at {domain}, and I can provide whatever paperwork helps.",
-            f"Our site {domain} has all our company details, and I'll gladly share documents to confirm we're legitimate.",
-        ]
+        verify = random.choice([
+            f"You can confirm everything about us at {domain}, and I'm glad to verify our account using our work email at that domain or to send our operating authority, business registration, and insurance.",
+            f"Our company details are all on our site at {domain}; I'm happy to verify by email at our company domain or provide our business license, authority, and insurance certificate.",
+            f"Everything checks out at {domain}. I can verify through our domain email or send whatever documents you need — registration, authority, or insurance.",
+            f"Our website is {domain}. I'm ready to complete verification by our work email on that domain, or to upload our business documents, whichever you prefer.",
+        ])
     else:
-        closes = [
-            "I'm happy to send over any documents you need to verify us.",
-            "I can provide whatever paperwork helps verify us.",
-        ]
+        verify = random.choice([
+            "I'm glad to complete verification however you need — a work email on our company domain, or our business registration, authority, and insurance documents.",
+            "I can verify our account by company email or by sending our operating authority, registration, and insurance.",
+        ])
 
-    p1 = " ".join([random.choice(openings), random.choice(nature), random.choice(intros)])
-    p3 = " ".join([random.choice(asks), random.choice(closes)])
-    paragraphs = [p1, job_block, beats, p3] if job_block else [p1, beats, p3]
+    # ── Close (always last) ──
+    close = random.choice([
+        "I'd appreciate you reviewing our account so the posting can go live. Thank you for your time.",
+        "Please let me know if you need anything else to verify us — I'd be grateful to get the posting running. Thank you.",
+        "I'm happy to provide anything further. Thank you for reviewing our account.",
+        "Whatever you need to confirm we're legitimate, just let me know. Thanks for taking the time to look this over.",
+        "I appreciate you taking another look so we can get back to hiring. Thank you.",
+    ])
+
+    # ── Assemble: identity first, close last, varied middle + paragraphing ──
+    # role, howapps (on-platform signal) and verify are core; the rest vary.
+    optional = {"whatwedo": whatwedo, "whyhiring": whyhiring, "legit": legit}
+    chosen = set(random.sample(list(optional), k=min(len(optional), random.randint(opt_lo, opt_hi))))
+
+    middle_orders = [
+        ["whatwedo", "whyhiring", "role", "howapps", "legit", "verify"],
+        ["role", "whatwedo", "whyhiring", "legit", "verify", "howapps"],
+        ["whatwedo", "role", "howapps", "whyhiring", "legit", "verify"],
+        ["whyhiring", "whatwedo", "role", "verify", "howapps", "legit"],
+        ["role", "howapps", "whatwedo", "legit", "whyhiring", "verify"],
+    ]
+    seq = random.choice(middle_orders)
+    blocks = {"whatwedo": whatwedo, "whyhiring": whyhiring, "role": role,
+              "howapps": howapps, "legit": legit, "verify": verify}
+    ordered = ["identity"]
+    for key in seq:
+        if key in ("role", "howapps") or (key == "verify" and domain) or key in chosen:
+            ordered.append(key)
+    ordered.append("close")
+    text = {"identity": identity, "close": close, **blocks}
+
+    # group consecutive blocks into paragraphs (close always stands alone)
+    paragraphs, i = [], 0
+    body = ordered[:-1]  # everything but close
+    while i < len(body):
+        take = 1 if (i == 0 or random.random() < 0.5) else 2
+        chunk = body[i:i + take]
+        paragraphs.append(" ".join(text[k] for k in chunk))
+        i += take
+    paragraphs.append(text["close"])
     return "\n\n".join(p for p in paragraphs if p)
 
 
