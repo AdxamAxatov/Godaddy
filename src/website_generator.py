@@ -585,6 +585,22 @@ REGIONAL_COVERAGE_CHECKLISTS = [
 
 
 
+def _annualize(pay_range: str):
+    """Annual-equivalent range from a weekly pay range (×52), e.g.
+    '$1,200 – $1,400 / week' -> '$62,400 – $72,800'. None if not weekly/parseable."""
+    low = pay_range.lower()
+    if "week" not in low and "/wk" not in low:
+        return None
+    nums = re.findall(r"[\d][\d,]*", pay_range)
+    if len(nums) < 2:
+        return None
+    try:
+        lo, hi = int(nums[0].replace(",", "")), int(nums[1].replace(",", ""))
+    except ValueError:
+        return None
+    return f"${lo * 52:,} – ${hi * 52:,}"
+
+
 def generate_job_description(info: dict) -> str:
     """Generate an Indeed-compliant CDL-A job description as HTML fragments.
 
@@ -678,6 +694,15 @@ def generate_job_description(info: dict) -> str:
     pay_lead = random.choice([
         f"{pay_range} (weekly gross)", f"{pay_range}, gross", f"{pay_range} weekly",
     ])
+    # Annual equivalent of the weekly range (×52), shown as an estimate.
+    annual = _annualize(pay_range)
+    annual_txt = ""
+    if annual:
+        annual_txt = random.choice([
+            f"approximately {annual} a year at a full schedule",
+            f"around {annual} annually with consistent miles",
+            f"roughly {annual} per year at a steady schedule",
+        ])
     pay_extra = []
     if info.get("orientation_pay"):
         pay_extra.append(f"{info['orientation_pay']} paid orientation")
@@ -689,15 +714,21 @@ def generate_job_description(info: dict) -> str:
         "Reliable weekly pay, direct-deposited",
     ])
     if pay_style == "bullets":
-        sections["pay"] = _section(titles["pay"], _ul([pay_lead, deposit] + pay_extra))
+        pay_bullets = [pay_lead]
+        if annual_txt:
+            pay_bullets.append(annual_txt[0].upper() + annual_txt[1:])
+        pay_bullets.append(deposit)
+        sections["pay"] = _section(titles["pay"], _ul(pay_bullets + pay_extra))
     elif pay_style == "sentence":
         bonus_txt = (" " + ". ".join(p[0].upper() + p[1:] for p in pay_extra) + ".") if pay_extra else ""
+        annual_clause = f" That works out to {annual_txt}." if annual_txt else ""
         sections["pay"] = _section(
-            titles["pay"], f"<p>This seat pays {pay_range} in weekly gross, with {deposit.lower()}.{bonus_txt}</p>")
+            titles["pay"], f"<p>This seat pays {pay_range} in weekly gross, with {deposit.lower()}.{annual_clause}{bonus_txt}</p>")
     else:  # leadline
         bonus_li = _ul(pay_extra) if pay_extra else ""
+        annual_p = f"<p>{annual_txt[0].upper() + annual_txt[1:]}.</p>" if annual_txt else ""
         sections["pay"] = _section(
-            titles["pay"], f"<p><b>{pay_range}</b> — weekly gross, {deposit.lower()}.</p>" + bonus_li)
+            titles["pay"], f"<p><b>{pay_range}</b> — weekly gross, {deposit.lower()}.</p>" + annual_p + bonus_li)
 
     # ── Route & schedule (sampled) ──
     route_pool = [
