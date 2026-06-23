@@ -28,10 +28,46 @@ render_site(info) -> (html, ctx); ctx carries image filenames for the zip.
 
 import colorsys
 import json
+import os
 import random
 
 from studio_engine import _build_data, _company_data, _ICON_PATHS, _fmt
 from website_generator import _company_data_script
+
+# ── No-repeat rotation for studio layout + palette ────────────────────────────
+# Plain random.choice over 6 studios with replacement makes look-alikes (and
+# even back-to-back repeats) common. Mirror the image picker: persist recently
+# used studios/palettes and pick around them so each site differs until the pool
+# cycles. Best-effort; never breaks rendering on a state-file error.
+_ROT_STATE_FILE = os.path.join(os.path.dirname(__file__), "..", "logs", "last_used_studios.json")
+
+
+def _load_rot_state():
+    try:
+        with open(_ROT_STATE_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, ValueError, OSError):
+        return {}
+
+
+def _save_rot_state(state):
+    try:
+        os.makedirs(os.path.dirname(_ROT_STATE_FILE), exist_ok=True)
+        with open(_ROT_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+    except OSError:
+        pass
+
+
+def _rotate_pick(options, recent, keep):
+    """Pick from `options` avoiding the `recent` list; update recent in place
+    (keeping the last `keep`). Falls back to the full pool once exhausted."""
+    candidates = [o for o in options if o not in recent] or list(options)
+    pick = random.choice(candidates)
+    recent.append(pick)
+    if len(recent) > keep:
+        del recent[: len(recent) - keep]
+    return pick
 
 
 def _rgb(h):
@@ -183,16 +219,24 @@ def _theory_theme(hue, scheme, radius, grain, mode):
             "radius": "%dpx" % radius, "grain": grain, "prgb": "%d,%d,%d" % prgb, "argb": "%d,%d,%d" % argb}
 
 
-# brand hue + harmony per studio (intentional mood; never random rainbow)
-_SEEDS = {
-    "press":  [(14, "analogous", 2, 0.05, "light"), (350, "analogous", 2, 0.05, "light")],   # terracotta / oxblood, warm
-    "lumen":  [(150, "split", 6, 0.03, "light"), (200, "analogous", 6, 0.03, "light")],       # green+gold / teal, calm
-    "apex":   [(24, "monochrome", 4, 0.05, "dark"), (214, "analogous", 4, 0.05, "dark")],     # copper / steel, automotive
-    "nebula": [(222, "triadic", 12, 0.05, "dark"), (250, "split", 12, 0.05, "dark")],         # electric blue / violet
-    "atlas":  [(226, "split", 12, 0.0, "light"), (178, "triadic", 12, 0.0, "light")],         # indigo+green / teal, SaaS
-    "forge":  [(32, "analogous", 2, 0.06, "dark"), (18, "analogous", 2, 0.05, "light")],      # amber / rust, industrial
+# Each studio keeps its signature character — (mode, radius, grain, harmony
+# scheme) — but its palette is generated across a WIDE spread of brand hues so
+# two sites on the same layout still differ clearly in color. The contrast
+# engine keeps every hue readable (curated, not neon). This + rotation is what
+# stops generated sites from looking alike.
+_STUDIO_STYLE = {
+    # studio:  (mode,    radius, grain, scheme)
+    "press":  ("light",  2,  0.05, "analogous"),    # editorial magazine, warm
+    "lumen":  ("light",  6,  0.03, "split"),        # luxury minimal, calm
+    "apex":   ("dark",   4,  0.05, "monochrome"),   # automotive premium
+    "nebula": ("dark",   12, 0.05, "triadic"),      # futuristic enterprise
+    "atlas":  ("light",  12, 0.0,  "split"),        # modern SaaS
+    "forge":  ("dark",   2,  0.06, "analogous"),    # dark industrial
 }
-THEMES = {k: [_theory_theme(*s) for s in v] for k, v in _SEEDS.items()}
+# Curated hue spread (skips muddy yellow-greens ~60-85); 11 hues × 6 studios.
+_PALETTE_HUES = [8, 24, 42, 96, 150, 175, 200, 224, 258, 292, 330]
+THEMES = {sid: [_theory_theme(h, sch, rad, gr, mode) for h in _PALETTE_HUES]
+          for sid, (mode, rad, gr, sch) in _STUDIO_STYLE.items()}
 
 
 # studio presets — each a distinct art direction
@@ -375,8 +419,18 @@ _CARRIER_CTA_SUBS = [
 
 def _build_payload(info):
     d = _build_data(info)
-    preset = random.choice(PRESETS)
-    theme = dict(random.choice(THEMES[preset["id"]]))
+    # rotate studio + palette so consecutive sites don't look alike
+    rot = _load_rot_state()
+    studio_recent = rot.get("studios", [])
+    sid = _rotate_pick([p["id"] for p in PRESETS], studio_recent, keep=4)
+    preset = next(p for p in PRESETS if p["id"] == sid)
+    pal_recent = rot.get("palettes", {}).get(sid, [])
+    pal_idx = _rotate_pick(list(range(len(THEMES[sid]))), pal_recent,
+                           keep=min(len(THEMES[sid]) - 1, 7))
+    theme = dict(THEMES[sid][pal_idx])
+    rot["studios"] = studio_recent
+    rot.setdefault("palettes", {})[sid] = pal_recent
+    _save_rot_state(rot)
     fh, fb = random.choice(_FONTS[preset["fonts"]])
     sf = random.choice(_SCRIPTS)
     hero_mix = random.choice(_HERO_MIX)
