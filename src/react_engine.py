@@ -417,9 +417,44 @@ _CARRIER_CTA_SUBS = [
 ]
 
 
+# ── Structural archetypes ─────────────────────────────────────────────────────
+# Studio = visual treatment; archetype = STRUCTURE (which sections, how many,
+# how long). Independent + rotated, so two sites differ in shape, not just paint.
+# Real carrier homepages range from lean ~6-block brochures to ~18-block corporate
+# scrolls; the mid-body is a shuffleable/optional pool. A 3-section spine
+# (services + about + careers) is always kept so every site still sells the
+# carrier AND recruits; everything else varies.
+_SPINE = ["services", "about", "careers"]
+_OPTIONAL = ["coverage", "stats", "showcase", "process", "testimonials"]
+_ARCHETYPES = {
+    "lean":       {"mid": (3, 4), "ticker": 0.15},   # tight brochure
+    "recruiting": {"mid": (4, 5), "ticker": 0.35},   # driver-forward
+    "mixed":      {"mid": (5, 6), "ticker": 0.50},   # shipper + driver
+    "corporate":  {"mid": (7, 8), "ticker": 0.85},   # long full scroll
+}
+# label/anchor for sections that earn a nav link (supporting sections don't)
+_NAV_LABELS = [("services", "Services", "#services"), ("coverage", "Coverage", "#coverage"),
+               ("about", "About", "#about"), ("careers", "Careers", "#careers")]
+
+
+def _compose_structure(rot):
+    """Pick a rotated archetype and build a varied section order + ticker flag.
+    Returns (archetype, order, show_ticker)."""
+    arch_recent = rot.get("archetypes", [])
+    arch = _rotate_pick(list(_ARCHETYPES), arch_recent, keep=2)
+    rot["archetypes"] = arch_recent
+    spec = _ARCHETYPES[arch]
+    target = random.randint(*spec["mid"])
+    fill_n = max(0, target - len(_SPINE))
+    fill = random.sample(_OPTIONAL, min(fill_n, len(_OPTIONAL)))
+    order = _SPINE + fill
+    random.shuffle(order)
+    return arch, order, random.random() < spec["ticker"]
+
+
 def _build_payload(info):
     d = _build_data(info)
-    # rotate studio + palette so consecutive sites don't look alike
+    # rotate studio + palette + archetype so consecutive sites don't look alike
     rot = _load_rot_state()
     studio_recent = rot.get("studios", [])
     sid = _rotate_pick([p["id"] for p in PRESETS], studio_recent, keep=4)
@@ -428,6 +463,7 @@ def _build_payload(info):
     pal_idx = _rotate_pick(list(range(len(THEMES[sid]))), pal_recent,
                            keep=min(len(THEMES[sid]) - 1, 7))
     theme = dict(THEMES[sid][pal_idx])
+    arch, order, show_ticker = _compose_structure(rot)
     rot["studios"] = studio_recent
     rot.setdefault("palettes", {})[sid] = pal_recent
     _save_rot_state(rot)
@@ -467,8 +503,10 @@ def _build_payload(info):
     cta_title = _fmt(random.choice(_CARRIER_CTA_TITLES), fmt)
     cta_sub = _fmt(random.choice(_CARRIER_CTA_SUBS), fmt)
 
-    nav = [("Services", "#services"), ("Coverage", "#coverage"),
-           ("About", "#about"), ("Careers", "#careers"), ("Contact", "#contact")]
+    # nav reflects the sections actually present (logical order, not body order),
+    # so links never point at a section that was composed out.
+    nav = [(label, href) for key, label, href in _NAV_LABELS if key in order]
+    nav.append(("Contact", "#contact"))
 
     icons = dict(_ICON_PATHS); icons.update(_CARRIER_ICONS)
 
@@ -494,7 +532,8 @@ def _build_payload(info):
         "perks": d["perks"], "showcase": showcase,
         "heroMix": hero_mix,
         "studio": {"id": preset["id"], "label": preset["label"], "variants": preset["v"],
-                   "order": preset["order"], "mode": theme["mode"], "fonts": preset["fonts"]},
+                   "order": order, "ticker": show_ticker, "archetype": arch,
+                   "mode": theme["mode"], "fonts": preset["fonts"]},
         "icons": icons,
     }
     return data, d, theme, fh, fb, sf
@@ -937,7 +976,7 @@ function Footer() {
 
 const SECTIONS = { services: Freight, coverage: Coverage, about: About, careers: Careers, stats: Stats, process: Process, showcase: Showcase, testimonials: Testimonials };
 function App() {
-  return <><Nav /><Hero /><Ticker />
+  return <><Nav /><Hero />{D.studio.ticker ? <Ticker /> : null}
     {D.studio.order.map((k, i) => { const C = SECTIONS[k]; return C ? <C key={k + i} /> : null; })}
     <CTA /><Footer /></>;
 }
