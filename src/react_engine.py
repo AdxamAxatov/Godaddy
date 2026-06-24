@@ -437,6 +437,27 @@ _NAV_LABELS = [("services", "Services", "#services"), ("coverage", "Coverage", "
                ("about", "About", "#about"), ("careers", "Careers", "#careers")]
 
 
+# Layout variants are now chosen INDEPENDENTLY per generation (not locked to the
+# studio), so the "bones" — nav, hero, each section's layout, footer — vary site
+# to site instead of being one of 6 fixed combos.
+_VARIANTS = {
+    "nav": ["rule", "solid", "floating"],
+    "hero": ["editorial", "split", "cinematic", "centered"],
+    "stats": ["ledger", "strip"],
+    "freight": ["cards", "list", "split"],
+    "careers": ["list", "accordion"],
+    "about": ["splitL", "splitR", "fullbleed", "centered"],
+    "process": ["timeline", "numbered"],
+    "showcase": ["marquee", "frame", "grid"],
+    "testimonials": ["pull", "cards"],
+    "footer": ["wordmark", "columns", "minimal"],
+}
+
+
+def _pick_variants():
+    return {k: random.choice(opts) for k, opts in _VARIANTS.items()}
+
+
 def _compose_structure(rot):
     """Pick a rotated archetype and build a varied section order + ticker flag.
     Returns (archetype, order, show_ticker)."""
@@ -531,7 +552,7 @@ def _build_payload(info):
         "testimonials": [{"q": q, "n": n, "r": r} for q, n, r in d["testimonials"]],
         "perks": d["perks"], "showcase": showcase,
         "heroMix": hero_mix,
-        "studio": {"id": preset["id"], "label": preset["label"], "variants": preset["v"],
+        "studio": {"id": preset["id"], "label": preset["label"], "variants": _pick_variants(),
                    "order": order, "ticker": show_ticker, "archetype": arch,
                    "mode": theme["mode"], "fonts": preset["fonts"]},
         "icons": icons,
@@ -795,9 +816,32 @@ function Stats() {
 /* ===== SERVICES (freight lines — credibility for shippers/brokers) ===== */
 function Freight() {
   const alt = D.studio.order.indexOf("services") % 2 === 0;
+  const sdesc = D.short + " moves dry van, refrigerated and specialized freight across " + D.coverageArea + " — with the equipment and capacity to match the load.";
+  if (V.freight === "list") {
+    // full-width numbered editorial rows — taller, no cards
+    return <Section id="services" alt={alt}><div className="mx-auto max-w-5xl px-6">
+      <Head n="01" kicker="What we haul" title={"Freight services built around your supply chain"} desc={sdesc} />
+      <Stagger>{D.freight.map((s, i) => <Item key={i}>
+        <div className="group grid grid-cols-[auto_1fr_auto] gap-6 items-baseline py-7 border-t border-border last:border-b transition-all hover:px-2">
+          <span className="font-heading font-bold text-[clamp(1.4rem,2.2vw,2rem)] text-muted/40 group-hover:text-primary transition-colors">{nn(i + 1)}</span>
+          <div><h3 className="font-heading text-xl md:text-2xl font-bold tracking-tight">{s.title}</h3><p className="text-muted mt-2 max-w-2xl leading-relaxed">{s.desc}</p></div>
+          <Icon name={s.icon} className="w-6 h-6 text-primary/40 group-hover:text-primary transition-colors hidden md:block" /></div></Item>)}
+      </Stagger></div></Section>;
+  }
+  if (V.freight === "split") {
+    // asymmetric: sticky intro left, compact service list right
+    return <Section id="services" alt={alt}><div className="mx-auto max-w-6xl px-6 grid md:grid-cols-[330px_1fr] gap-12">
+      <div className="md:sticky md:top-28 self-start"><Label n="">What we haul</Label>
+        <h2 className={cn("font-heading font-bold tracking-[-0.02em] mt-5 leading-[1.04]", SERIF ? "text-[clamp(1.9rem,3.4vw,2.8rem)]" : "text-[clamp(1.8rem,3vw,2.5rem)]")}>Freight built around your supply chain</h2>
+        <p className="text-muted mt-5 leading-relaxed">{sdesc}</p></div>
+      <Stagger className="grid sm:grid-cols-2 gap-x-8 gap-y-7 self-start">{D.freight.map((s, i) => <Item key={i}>
+        <div className="flex gap-4"><Icon name={s.icon} className="w-6 h-6 text-primary shrink-0 mt-1" />
+          <div><h3 className="font-heading text-lg font-bold tracking-tight">{s.title}</h3><p className="text-muted mt-1.5 text-[0.95rem] leading-relaxed">{s.desc}</p></div></div></Item>)}
+      </Stagger></div></Section>;
+  }
+  // cards grid (default)
   return <Section id="services" alt={alt}><div className="mx-auto max-w-6xl px-6">
-    <Head n="" kicker="What we haul" title={"Freight services built around your supply chain"}
-      desc={D.short + " moves dry van, refrigerated and specialized freight across " + D.coverageArea + " — with the equipment and capacity to match the load."} />
+    <Head n="" kicker="What we haul" title={"Freight services built around your supply chain"} desc={sdesc} />
     <Stagger className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">{D.freight.map((s, i) => <Item key={i}>
       <Card className="group h-full p-7 transition-all hover:-translate-y-1 hover:shadow-xl">
         <div className="grid place-items-center w-12 h-12 rounded-[var(--radius)] bg-primary/10 text-primary"><Icon name={s.icon} className="w-6 h-6" /></div>
@@ -856,21 +900,46 @@ function CareersAccordion({ alt }) {
         <Img src={D.showcase[open % 4].img} alt={D.benefits[open].title} className="rounded-[calc(var(--radius)+8px)] border border-border aspect-[5/4]" /></motion.div></AnimatePresence></div>
     </div></div></Section>;
 }
-function Careers() { const alt = D.studio.order.indexOf("careers") % 2 === 0; return V.services === "accordion" ? <CareersAccordion alt={alt} /> : <CareersList alt={alt} />; }
+function Careers() { const alt = D.studio.order.indexOf("careers") % 2 === 0; return V.careers === "accordion" ? <CareersAccordion alt={alt} /> : <CareersList alt={alt} />; }
 
 /* ===== ABOUT ===== */
+function AboutHeading({ light }) {
+  return <>
+    <Reveal><Label>About {D.short}</Label></Reveal>
+    <Reveal delay={0.06}><h2 className={cn("font-heading font-bold tracking-[-0.02em] mt-5 leading-[1.05]", light && "text-white", SERIF ? "text-[clamp(2rem,3.8vw,3rem)]" : "text-[clamp(1.9rem,3.4vw,2.7rem)]")}>{D.aboutTitle}</h2></Reveal>
+    <Reveal delay={0.12}><p className={cn("mt-6 leading-relaxed text-[1.05rem]", light ? "text-white/80" : "text-muted")}>{D.aboutP1}</p></Reveal>
+    <Reveal delay={0.16}><p className={cn("mt-3 leading-relaxed", light ? "text-white/75" : "text-muted")}>{D.aboutP2}</p></Reveal>
+  </>;
+}
+function SafetyGrid({ light }) {
+  return <Stagger className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3.5 mt-8">{D.safety.map((p, i) => <Item key={i}>
+    <div className={cn("flex items-start gap-2.5 font-medium text-[0.95rem]", light && "text-white/90")}><Icon name="check" className="w-4 h-4 text-primary mt-1 shrink-0" />{p}</div></Item>)}</Stagger>;
+}
 function About() {
-  const alt = D.studio.order.indexOf("about") % 2 === 0;
-  return <Section id="about" alt={alt}><div className="mx-auto max-w-6xl px-6 grid md:grid-cols-2 gap-14 items-center">
-    <Reveal className="relative order-2 md:order-1"><Img src={D.showcase[1].img} alt={D.company} parallax className="rounded-[calc(var(--radius)+12px)] border border-border aspect-[4/5] shadow-xl" />
-      <div className="absolute -top-5 -right-5 hidden md:block"><Card className="px-6 py-5 shadow-xl bg-surface"><div className="font-heading font-bold text-2xl text-primary leading-tight">Licensed<br />&amp; Insured</div><div className="text-xs text-muted uppercase tracking-widest mt-1.5">On every load</div></Card></div></Reveal>
-    <div className="order-1 md:order-2"><Reveal><Label>About {D.short}</Label></Reveal>
-      <Reveal delay={0.06}><h2 className={cn("font-heading font-bold tracking-[-0.02em] mt-5 leading-[1.05]", SERIF ? "text-[clamp(2rem,3.8vw,3rem)]" : "text-[clamp(1.9rem,3.4vw,2.7rem)]")}>{D.aboutTitle}</h2></Reveal>
-      <Reveal delay={0.12}><p className="text-muted mt-6 leading-relaxed text-[1.05rem]">{D.aboutP1}</p></Reveal>
+  const alt = D.studio.order.indexOf("about") % 2 === 0, v = V.about;
+  if (v === "centered") {
+    return <Section id="about" alt={alt}><div className="mx-auto max-w-3xl px-6 text-center">
+      <Reveal><Label center>About {D.short}</Label></Reveal>
+      <Reveal delay={0.06}><h2 className={cn("font-heading font-bold tracking-[-0.02em] mt-5 leading-[1.05]", SERIF ? "text-[clamp(2.1rem,4.2vw,3.4rem)]" : "text-[clamp(2rem,3.8vw,3rem)]")}>{D.aboutTitle}</h2></Reveal>
+      <Reveal delay={0.12}><p className="text-muted mt-6 leading-relaxed text-lg">{D.aboutP1}</p></Reveal>
       <Reveal delay={0.16}><p className="text-muted mt-3 leading-relaxed">{D.aboutP2}</p></Reveal>
-      <Stagger className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3.5 mt-8">{D.safety.map((p, i) => <Item key={i}>
-        <div className="flex items-start gap-2.5 font-medium text-[0.95rem]"><Icon name="check" className="w-4 h-4 text-primary mt-1 shrink-0" />{p}</div></Item>)}</Stagger>
-    </div></div></Section>;
+      <Stagger className="flex flex-wrap justify-center gap-2.5 mt-9">{D.safety.map((p, i) => <Item key={i}>
+        <span className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium"><Icon name="check" className="w-4 h-4 text-primary" />{p}</span></Item>)}</Stagger>
+    </div></Section>;
+  }
+  if (v === "fullbleed") {
+    return <section id="about" className="relative py-28 md:py-40 overflow-hidden">
+      <div className="absolute inset-0 -z-10"><Img src={D.showcase[1].img} alt={D.company} className="w-full h-full" />
+        <div className="absolute inset-0" style={{ background: "linear-gradient(90deg,rgba(8,8,10,.88),rgba(8,8,10,.62) 52%,rgba(8,8,10,.2))" }} /></div>
+      <div className="mx-auto max-w-6xl px-6"><div className="max-w-xl text-white"><AboutHeading light /><SafetyGrid light /></div></div></section>;
+  }
+  const imgRight = v === "splitR";
+  return <Section id="about" alt={alt}><div className="mx-auto max-w-6xl px-6 grid md:grid-cols-2 gap-14 items-center">
+    <Reveal className={cn("relative", imgRight ? "order-1 md:order-2" : "order-2 md:order-1")}>
+      <Img src={D.showcase[1].img} alt={D.company} parallax className="rounded-[calc(var(--radius)+12px)] border border-border aspect-[4/5] shadow-xl" />
+      <div className={cn("absolute -top-5 hidden md:block", imgRight ? "-left-5" : "-right-5")}><Card className="px-6 py-5 shadow-xl bg-surface"><div className="font-heading font-bold text-2xl text-primary leading-tight">Licensed<br />&amp; Insured</div><div className="text-xs text-muted uppercase tracking-widest mt-1.5">On every load</div></Card></div></Reveal>
+    <div className={cn(imgRight ? "order-2 md:order-1" : "order-1 md:order-2")}><AboutHeading /><SafetyGrid /></div>
+  </div></Section>;
 }
 
 /* ===== PROCESS ===== */
@@ -960,17 +1029,45 @@ function CTA() {
 }
 
 /* ===== FOOTER ===== */
+function FooterLinks() {
+  return <>{D.nav.map(n => <a key={n.href} href={n.href} className="text-sm text-muted hover:text-text transition">{n.label}</a>)}</>;
+}
+function FooterBottom() {
+  return <div className="mt-6 pt-6 border-t border-border flex flex-col md:flex-row justify-between gap-3 text-xs text-muted">
+    <span>© {D.year} {D.company}. All rights reserved.</span>
+    <span className="max-w-2xl md:text-right">Equal Opportunity Employer — all qualified applicants receive consideration without regard to race, color, religion, sex, national origin, disability or veteran status.</span></div>;
+}
 function Footer() {
+  const v = V.footer;
+  if (v === "minimal") {
+    return <footer className="border-t border-border py-14"><div className="mx-auto max-w-4xl px-6 text-center">
+      <div className="flex justify-center"><Logo /></div>
+      <p className="text-muted text-sm mt-5 max-w-md mx-auto leading-relaxed">{D.company} — {D.routesType}, {D.coverageArea}. Licensed &amp; insured.</p>
+      <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 mt-6"><FooterLinks /></div>
+      <div className="mt-7 text-xs text-muted">{D.email} · {D.cityState}</div>
+      <FooterBottom />
+    </div></footer>;
+  }
+  if (v === "columns") {
+    return <footer className="border-t border-border pt-16 pb-10"><div className="mx-auto max-w-6xl px-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+        <div className="col-span-2 md:col-span-1"><Logo /><p className="text-muted text-sm mt-4 leading-relaxed">Licensed &amp; insured carrier in {D.cityState}.</p></div>
+        <div><div className="text-[11px] uppercase tracking-[0.18em] text-muted mb-4">Explore</div><div className="flex flex-col gap-2.5"><FooterLinks /></div></div>
+        <div><div className="text-[11px] uppercase tracking-[0.18em] text-muted mb-4">Company</div><div className="flex flex-col gap-2.5 text-sm text-muted"><span>{D.routesType}</span><span>{D.coverageArea}</span><span>Licensed &amp; Insured</span></div></div>
+        <div><div className="text-[11px] uppercase tracking-[0.18em] text-muted mb-4">Contact</div><div className="flex flex-col gap-2.5 text-sm text-muted"><span>{D.email}</span><span>{D.cityState}</span><a href="#contact" className="text-primary font-semibold">Get in touch →</a></div></div>
+      </div>
+      <FooterBottom />
+    </div></footer>;
+  }
+  // wordmark (default)
   return <footer className="border-t border-border pt-20 pb-10"><div className="mx-auto max-w-6xl px-6">
     <div className="grid md:grid-cols-[1.5fr_1fr_1fr] gap-10">
       <div><Logo /><p className="text-muted text-sm mt-5 leading-relaxed max-w-xs">{D.company} — an asset-based motor carrier moving freight across {D.cityState} and {D.coverageArea}. {D.routesType}, modern fleet, real accountability.</p></div>
-      <div><div className="text-[11px] uppercase tracking-[0.18em] text-muted mb-4">Explore</div><div className="flex flex-col gap-2.5">{D.nav.map(n => <a key={n.href} href={n.href} className="text-sm text-muted hover:text-text transition">{n.label}</a>)}<a href="#contact" className="text-sm text-primary font-semibold">Contact us →</a></div></div>
+      <div><div className="text-[11px] uppercase tracking-[0.18em] text-muted mb-4">Explore</div><div className="flex flex-col gap-2.5"><FooterLinks /><a href="#contact" className="text-sm text-primary font-semibold">Contact us →</a></div></div>
       <div><div className="text-[11px] uppercase tracking-[0.18em] text-muted mb-4">Get in touch</div><div className="text-sm text-muted space-y-1.5"><div>{D.email}</div><div>{D.cityState}</div><div>Licensed &amp; Insured Carrier</div></div></div>
     </div>
     <div className="mt-16 font-heading font-bold tracking-[-0.04em] leading-none text-[clamp(2.5rem,12vw,9rem)] text-text/[0.06] select-none">{D.short}</div>
-    <div className="mt-6 pt-6 border-t border-border flex flex-col md:flex-row justify-between gap-3 text-xs text-muted">
-      <span>© {D.year} {D.company}. All rights reserved.</span>
-      <span className="max-w-2xl md:text-right">Equal Opportunity Employer — all qualified applicants receive consideration without regard to race, color, religion, sex, national origin, disability or veteran status.</span></div>
+    <FooterBottom />
   </div></footer>;
 }
 
