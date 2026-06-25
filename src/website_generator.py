@@ -585,40 +585,23 @@ REGIONAL_COVERAGE_CHECKLISTS = [
 
 
 
-def _annualize(pay_range: str):
-    """Annual-equivalent range from a weekly pay range (×52), e.g.
-    '$1,200 – $1,400 / week' -> '$62,400 – $72,800'. None if not weekly/parseable."""
-    low = pay_range.lower()
-    if "week" not in low and "/wk" not in low:
-        return None
-    nums = re.findall(r"[\d][\d,]*", pay_range)
-    if len(nums) < 2:
-        return None
-    try:
-        lo, hi = int(nums[0].replace(",", "")), int(nums[1].replace(",", ""))
-    except ValueError:
-        return None
-    return f"${lo * 52:,} – ${hi * 52:,}"
-
-
 def generate_job_description(info: dict) -> str:
     """Generate an Indeed-compliant CDL-A job description as HTML fragments.
 
-    Variation engine: randomizes voice/tone, posting length, which optional
-    sections appear, the ORDER of the middle sections, and samples every bullet
-    from deep pools — so two postings rarely share a paragraph. This uniqueness
-    is also the primary defense against Indeed's duplicate/near-duplicate
-    consolidation (it keys on job title + location and treats repeated
-    boilerplate across accounts as search-result manipulation).
+    FIXED skeleton (the client's preferred layout) — title, header facts, About,
+    What We Offer, pay-varies note, Home Time, Responsibilities, Requirements,
+    Who This Is For, EEO — in the same order every time. Every sentence and
+    bullet is SAMPLED from deep pools, so two postings read differently while the
+    structure stays consistent. That body-level variation is also the defense
+    against Indeed's near-duplicate consolidation.
 
     Compliance (verified 2026 vs. Indeed + EEOC/FMCSA; guarded by
     tests/test_job_description_compliance.py):
-      - Apply on-platform only; NO phone/email/URL/QR anywhere in the body.
-      - One concrete pay range; bonuses additive; never "up to"/unlimited/guaranteed.
+      - Apply on-platform only; NO phone/email/URL/QR in the body.
+      - One concrete pay range; never "up to"/unlimited/guaranteed.
       - No ALL-CAPS lines, no $$$/!!!/emoji, no keyword stuffing.
-      - 21+/CDL-A/DOT medical framed as federal requirements, never preferences;
-        no gendered/age-coded/"native speaker" language.
-      - Core legal requirements ALWAYS present; only phrasing/extras vary.
+      - CDL-A, 21+ (federal interstate rule) and DOT medical ALWAYS present,
+        framed as requirements — never preferences or coded/age language.
     """
     company = info["company_name"]
     city_state = info["city_state"]
@@ -629,17 +612,9 @@ def generate_job_description(info: dict) -> str:
     routes_type = info.get("routes_type", "OTR Routes")
     is_regional = "regional" in routes_type.lower()
     route_label = "Regional" if is_regional else "OTR"
-    coverage_noun = "a multi-state regional area" if is_regional else "the lower 48"
-    coverage_adj = "multi-state regional" if is_regional else "48-state"
-    coverage_phrase = "a focused multi-state region" if is_regional else "all 48 states"
+    coverage = "a multi-state region" if is_regional else "all 48 states"
+    route_type_line = "Regional, multi-state coverage" if is_regional else "OTR, 48-state coverage"
     city_only = city_state.split(",")[0].strip() if "," in city_state else city_state
-
-    tone = random.choice(["direct", "professional", "conversational"])
-    length = random.choice(["short", "medium", "long"])
-    # bullets-per-section and optional-section budget scale with length
-    nb_lo, nb_hi, opt_lo, opt_hi = {
-        "short": (3, 4, 1, 2), "medium": (4, 5, 2, 3), "long": (5, 6, 3, 5),
-    }[length]
 
     def _ul(items):
         return "<ul>\n" + "".join(f"<li>{i}</li>\n" for i in items) + "</ul>"
@@ -647,259 +622,147 @@ def generate_job_description(info: dict) -> str:
     def _section(title, content_html):
         return f"<p><b>{title}</b></p>\n{content_html}"
 
-    def _pick(pool, lo, hi):
-        return random.sample(pool, k=min(len(pool), random.randint(lo, hi)))
+    def _sample(pool, k):
+        return random.sample(pool, k=min(len(pool), k))
 
-    titles = {
-        "direct": {"pay": "Pay", "route": "Route & Schedule", "benefits": "Benefits",
-                   "duties": "Responsibilities", "reqs": "Requirements", "culture": "Why Drivers Stay",
-                   "day": "A Day on the Job", "equipment": "The Equipment", "safety": "Safety",
-                   "apply": "Apply"},
-        "professional": {"pay": "Compensation", "route": "Routes & Home Time", "benefits": "Benefits & Perks",
-                         "duties": "Job Responsibilities", "reqs": "Qualifications", "culture": "What Drivers Value",
-                         "day": "What the Role Looks Like", "equipment": "Equipment", "safety": "Safety & Compliance",
-                         "apply": "How to Apply"},
-        "conversational": {"pay": "The Pay", "route": "Your Routes & Home Time", "benefits": "What You Get",
-                           "duties": "What You'll Do", "reqs": "What You Need", "culture": "Why Drivers Choose Us",
-                           "day": "What Your Week Looks Like", "equipment": "Your Truck", "safety": "How We Run",
-                           "apply": "Ready to Roll?"},
-    }[tone]
+    parts = []
 
-    # ── Intro (always first) ──
-    intros = [
-        f"{company} is a {city_only}-based dry van carrier running {route_label} freight across {coverage_phrase}. We invest in our equipment, we invest in our people, and we don't cut corners on either. If you've been driving long enough to know what a well-run operation feels like, you'll recognize it here.",
-        f"Based out of {city_only}, {company} hauls {route_label} dry van freight across {coverage_phrase}. Clean trucks, experienced drivers, and a dispatch team that actually picks up the phone — that's the whole formula.",
-        f"{company} runs {route_label} dry van freight out of {city_only} across {coverage_phrase}. We're not the biggest carrier on the road — we're one of the most dependable, and we're adding experienced CDL-A drivers to the fleet.",
-        f"Out of {city_only}, {company} operates a professional dry van fleet covering {coverage_phrase}. We're hiring CDL-A drivers who want consistent miles, honest pay, and a carrier that delivers on what it promises.",
-        f"{company} is a straightforward {route_label} carrier based in {city_only} — clean trucks, steady freight, and a dispatch team that backs you up. If you've been through carriers that overpromise and underdeliver, this is what different looks like.",
-        f"Headquartered in {city_only}, {company} runs {route_label} dry van freight across {coverage_phrase}. We run a tight operation, we pay consistently, and we don't waste anyone's time with games around home time or settlements.",
-        f"{company} is a {city_only} trucking operation hauling dry van freight across {coverage_phrase}. We hire drivers who take the work seriously, and in return we provide the tools, the freight, and the support to make it worth their while.",
-        f"At {company}, we run {route_label} dry van freight from {city_only} across {coverage_phrase}. Modern equipment, steady freight, and a team that treats drivers like the professionals they are — that's what we offer.",
-        f"{company} hauls {route_label} dry van freight out of {city_only} across {coverage_phrase}. We built this company on consistency, for our customers and our drivers alike. You get steady freight, straight pay, and a dispatch team that actually helps.",
-        f"From {city_only}, {company} covers {coverage_phrase} with {route_label} dry van freight. We're hiring drivers who want to work for a carrier that acts like it values them: honest pay, real home time, and well-maintained equipment.",
-        f"{company} is a {city_only}-based carrier running dry van freight across {coverage_phrase}. Our drivers stay because the work is consistent, the pay is fair, and dispatch doesn't disappear when something goes sideways.",
-        f"Out of {city_only}, {company} runs {route_label} dry van freight across {coverage_phrase}. We believe good drivers deserve a good company — clean equipment, reliable freight, and straight talk. If that matches what you're looking for, keep reading.",
-        f"{company} operates {route_label} dry van freight from {city_only} across {coverage_phrase}. We're adding experienced CDL-A drivers to the team, and if you take pride in the work, you'll fit right in.",
-        f"{company} is a {city_only} dry van carrier serving {coverage_phrase}. We run a professional operation and expect the same from the people behind the wheel — the basics done right, every week.",
-        f"Based in {city_only}, {company} runs {route_label} dry van freight across {coverage_phrase}. Consistent miles, fair pay, and a team that doesn't disappear when you need them — that's what driving here looks like.",
-        f"{company} keeps freight moving across {coverage_phrase} with a {route_label} dry van operation run out of {city_only}. We're growing, and we're looking for CDL-A drivers who want a home with a carrier that does the basics right.",
-        f"There's a difference between a carrier that talks about respecting drivers and one that proves it on every settlement. {company}, out of {city_only}, runs {route_label} dry van freight across {coverage_phrase} — and our retention shows the difference.",
-        f"{company} runs dependable {route_label} dry van lanes across {coverage_phrase} from our {city_only} base. If you're tired of chasing miles that never show up, this is steady freight with a team that has your back.",
-        f"Looking for a CDL-A seat that comes with real miles and real home time? {company} hauls {route_label} dry van freight across {coverage_phrase} out of {city_only}, and we're hiring drivers who want consistency over hype.",
-        f"{company} is a driver-focused {route_label} carrier in {city_only} moving dry van freight across {coverage_phrase}. We keep the equipment new, the freight steady, and the communication honest.",
-    ]
-    sections = {"intro": f"<p>{random.choice(intros)}</p>"}
+    # ── 1) Title (fixed shape; route word follows the lane type) ──
+    parts.append(f"<p><b>CDL-A {route_label} Truck Driver</b></p>")
 
-    # ── Pay (3 presentations; bonuses additive; never up to/unlimited/guaranteed) ──
-    pay_lead = random.choice([
-        f"{pay_range} (weekly gross)", f"{pay_range}, gross", f"{pay_range} weekly",
+    # ── 2) Header facts ──
+    freight_type = random.choice([
+        "Dry Van / Refrigerated", "Dry Van and Reefer",
+        "Dry Van / Reefer", "Dry Van / Refrigerated (Reefer)",
     ])
-    # Annual equivalent of the weekly range (×52), shown as an estimate.
-    annual = _annualize(pay_range)
-    annual_txt = ""
-    if annual:
-        annual_txt = random.choice([
-            f"approximately {annual} a year at a full schedule",
-            f"around {annual} annually with consistent miles",
-            f"roughly {annual} per year at a steady schedule",
-        ])
-    pay_extra = []
-    if info.get("orientation_pay"):
-        pay_extra.append(f"{info['orientation_pay']} paid orientation")
-    if info.get("sign_on_bonus"):
-        pay_extra.append(f"{info['sign_on_bonus']} sign-on bonus, paid in addition to your weekly base")
-    pay_style = random.choice(["bullets", "sentence", "leadline"])
-    deposit = random.choice([
-        "Paid weekly via direct deposit", "Weekly settlements by direct deposit",
-        "Reliable weekly pay, direct-deposited",
-    ])
-    if pay_style == "bullets":
-        pay_bullets = [pay_lead]
-        if annual_txt:
-            pay_bullets.append(annual_txt[0].upper() + annual_txt[1:])
-        pay_bullets.append(deposit)
-        sections["pay"] = _section(titles["pay"], _ul(pay_bullets + pay_extra))
-    elif pay_style == "sentence":
-        bonus_txt = (" " + ". ".join(p[0].upper() + p[1:] for p in pay_extra) + ".") if pay_extra else ""
-        annual_clause = f" That works out to {annual_txt}." if annual_txt else ""
-        sections["pay"] = _section(
-            titles["pay"], f"<p>This seat pays {pay_range} in weekly gross, with {deposit.lower()}.{annual_clause}{bonus_txt}</p>")
-    else:  # leadline
-        bonus_li = _ul(pay_extra) if pay_extra else ""
-        annual_p = f"<p>{annual_txt[0].upper() + annual_txt[1:]}.</p>" if annual_txt else ""
-        sections["pay"] = _section(
-            titles["pay"], f"<p><b>{pay_range}</b> — weekly gross, {deposit.lower()}.</p>" + annual_p + bonus_li)
-
-    # ── Route & schedule (sampled) ──
-    route_pool = [
-        f"{coverage_adj.capitalize()} coverage out of {city_state}",
-        home_time, "No-touch dry van freight",
-        "Modern, well-maintained equipment on every run",
-        "Consistent, dependable lanes — not feast-or-famine miles",
-        "Drop-and-hook and live loads, planned around your hours",
-        "Predictable weekly schedule you can plan your life around",
-        f"Steady miles that keep you rolling across {coverage_noun}",
+    facts = [
+        ("Company", company),
+        ("Location", city_state),
+        ("Job Type", "Full-time"),
+        ("Pay", f"{pay_range}, weekly gross"),
+        ("Freight Type", freight_type),
+        ("Route Type", route_type_line),
     ]
-    # keep the location line and home_time anchored, sample the rest
-    route_anchor = [route_pool[0], home_time]
-    route_rest = _pick(route_pool[2:], max(1, nb_lo - 2), nb_hi - 2)
-    sections["route"] = _section(titles["route"], _ul(route_anchor + route_rest))
+    parts.append("<p>" + "<br>\n".join(f"<b>{k}:</b> {v}" for k, v in facts) + "</p>")
 
-    # ── Duties (tone pool, sampled subset, shuffled) ──
-    duties_by_tone = {
-        "direct": [
-            f"Safely operate a Class A commercial vehicle on assigned {route_label} lanes across {coverage_noun}",
-            "Complete thorough pre-trip and post-trip inspections per DOT requirements",
-            "Pick up and deliver freight on time per the dispatch schedule",
-            "Maintain accurate ELD logs, bills of lading, and delivery documentation",
-            "Keep dispatch informed on load status, ETAs, and road conditions",
-            "Follow all federal, state, and company safety regulations without exception",
-            "Secure loads and verify counts before leaving the shipper",
-            "Report mechanical issues promptly so they get fixed right",
-        ],
-        "professional": [
-            f"Operate a company-assigned Class A vehicle on {route_label.lower()} routes throughout {coverage_noun}",
-            "Execute safe, timely freight pickups and deliveries in line with customer and company standards",
-            "Conduct thorough pre-trip and post-trip vehicle inspections in compliance with DOT regulations",
-            "Maintain regular communication with the dispatch team regarding load status, ETAs, and route adjustments",
-            "Ensure full compliance with FMCSA Hours of Service regulations and maintain accurate electronic logs",
-            "Document and report equipment defects, incidents, or service delays accurately and promptly",
-            "Verify freight counts and secure loads in accordance with company procedures",
-            "Represent the company professionally at every shipper and receiver",
-        ],
-        "conversational": [
-            f"Run {route_label} loads across {coverage_noun} out of {city_state}",
-            "Do your pre-trip and post-trip every day — it protects you and the equipment",
-            "Pick up and deliver on time, and handle the customer's dock like it's your own",
-            "Keep your ELD logs clean — we run a tight operation and expect the same from drivers",
-            "Stay in touch with dispatch — communication keeps everyone moving",
-            "All no-touch dry van, so your job is driving, not loading",
-            "Give us a heads-up early if something's off with the truck",
-            "Treat every shipper and receiver like they're worth keeping",
-        ],
-    }
-    sections["duties"] = _section(titles["duties"], _ul(_pick(duties_by_tone[tone], nb_lo, nb_hi)))
+    # ── 3) About {company} (company line + who-we-want line) ──
+    about_p1 = random.choice([
+        f"{company} is a {city_only}-based trucking company operating across {coverage}. We focus on clear communication, dependable freight movement, and professional support for drivers on the road.",
+        f"Based in {city_only}, {company} runs {route_label} loads across {coverage}. We keep the operation straightforward — steady miles, clear load information, and a dispatch team that backs drivers from pickup to delivery.",
+        f"{company} is a {route_label} carrier headquartered in {city_only}, covering {coverage}. We run on dependable loads, well-maintained equipment, and honest communication with the people behind the wheel.",
+        f"Out of {city_only}, {company} moves dry van and reefer loads across {coverage}. Our focus is dependable service for our customers and steady, well-supported miles for our drivers.",
+        f"{company} is a driver-focused carrier based in {city_only}, running loads across {coverage}. We believe in clear expectations, consistent miles, and treating drivers like professionals.",
+        f"{company} operates {route_label} lanes across {coverage} from our {city_only} base. We built the company on dependable loads, clean equipment, and straight communication.",
+    ])
+    about_p2 = random.choice([
+        f"We are looking for CDL-A drivers who want steady {route_label} work, direct communication with dispatch, and a company that keeps the job simple and straightforward.",
+        f"We are hiring CDL-A drivers who value consistent miles, clear expectations, and a dispatch team that actually backs them up on the road.",
+        f"We are adding CDL-A drivers who want dependable {route_label} miles, honest pay, and a carrier that does the basics right every week.",
+        f"We are looking for experienced CDL-A drivers who take safety seriously and want a company that communicates clearly and pays on time.",
+        f"We are growing our team and looking for CDL-A drivers who want consistent {route_label} miles and a straightforward, professional place to work.",
+    ])
+    parts.append(_section(f"About {company}", f"<p>{about_p1}</p>\n<p>{about_p2}</p>"))
 
-    # ── Requirements (core legal reqs ALWAYS present; phrasing + extras vary) ──
-    cdl = random.choice([
+    # ── 4) What We Offer (anchored pay + sampled extras) + pay-varies note ──
+    offer_anchor = [f"{pay_range} weekly gross", "Paid weekly",
+                    f"{route_label} routes across {coverage}"]
+    offer_pool = [
+        "Dispatch support while you are on the road",
+        "Modern, well-maintained equipment",
+        "Clear load details before each trip",
+        "Professional and respectful work environment",
+        "Consistent, dependable miles",
+        "Direct communication with dispatch",
+        "No-touch on most loads",
+        "Weekly settlements by direct deposit",
+        "Steady lanes you can plan your week around",
+    ]
+    offer_items = offer_anchor + _sample(offer_pool, random.randint(4, 6))
+    pay_varies = random.choice([
+        "Pay may vary based on experience, miles, route availability, safety, and overall performance.",
+        "Actual weekly pay depends on experience, available miles, route availability, and overall performance.",
+        "Weekly earnings vary based on experience, miles, routes, and safety performance.",
+        "Your weekly pay will reflect your experience, the miles available, route assignments, and overall performance.",
+    ])
+    parts.append(_section("What We Offer", _ul(offer_items) + f"\n<p>{pay_varies}</p>"))
+
+    # ── 5) Home Time ──
+    home_para = random.choice([
+        "Drivers are typically out for about 2 weeks at a time, with home time discussed clearly before dispatch. Exact home time may vary depending on loads, location, and scheduling needs.",
+        f"{home_time}. Specific home time is confirmed before each run and can vary with loads, location, and scheduling.",
+        "Drivers stay out for roughly two weeks at a stretch, and home time is talked through clearly before you are dispatched. Actual home time can shift with loads, location, and scheduling.",
+        f"We keep home time honest and clear. {home_time}, with exact timing confirmed up front and subject to load and route availability.",
+    ])
+    parts.append(_section("Home Time", f"<p>{home_para}</p>"))
+
+    # ── 6) Responsibilities ──
+    duties_pool = [
+        "Safely operate a Class A commercial vehicle",
+        f"Pick up and deliver freight on assigned {route_label} routes",
+        "Communicate with dispatch about load status, delays, and delivery updates",
+        "Complete required trip paperwork and inspections",
+        "Follow DOT, FMCSA, company, and safety regulations",
+        "Maintain professional communication with customers, dispatch, and team members",
+        "Keep equipment clean and report maintenance concerns when needed",
+        "Complete thorough pre-trip and post-trip inspections",
+        "Maintain accurate electronic logs and delivery documentation",
+        "Secure loads and verify counts before leaving the shipper",
+    ]
+    duties = duties_pool[:2] + _sample(duties_pool[2:], random.randint(4, 6))
+    parts.append(_section("Responsibilities", _ul(duties)))
+
+    # ── 7) Requirements (core legal reqs ALWAYS present) ──
+    req_cdl = random.choice([
+        "Valid Class A CDL",
         "Valid Class A Commercial Driver's License (CDL-A)",
         "Current and valid CDL-A (Class A Commercial Driver's License)",
-        "Active Class A Commercial Driver's License (CDL-A) in good standing",
     ])
-    exp = random.choice([
-        f"Minimum {min_exp} of verifiable {route_label} CDL-A driving experience within the past 3 years",
-        f"At least {min_exp} of recent, verifiable Class A driving experience",
-        f"{min_exp} or more of verifiable CDL-A experience in the last 3 years",
-    ])
-    age = random.choice([
+    req_age = random.choice([
         "Must be at least 21 years old (federal interstate commerce requirement)",
-        "Minimum age 21, as required for interstate operation under federal regulations",
-        "At least 21 years of age, per FMCSA interstate driving requirements",
+        "At least 21 years of age, as required for interstate operation under federal rules",
+        "Minimum age 21, per FMCSA interstate driving requirements",
     ])
-    med = random.choice([
+    req_med = random.choice([
+        "Valid DOT medical card",
         "Current DOT medical examiner's certificate",
-        "Valid DOT medical card", "Current and valid DOT medical examiner's certificate",
+        "Current and valid DOT medical examiner's certificate",
     ])
-    drug = random.choice([
-        "Must pass DOT pre-employment drug screening per 49 CFR Part 382",
-        "Able to pass DOT pre-employment drug and alcohol testing (49 CFR Part 382)",
+    req_screen = random.choice([
+        "Ability to pass required drug screening and background/MVR checks",
+        "Able to pass DOT pre-employment drug screening and background/MVR checks",
+        "Must pass required drug screening and a background and motor vehicle record (MVR) check",
     ])
-    work = random.choice([
-        "Legally authorized to work in the United States",
-        "Authorized to work in the United States",
-    ])
-    core_reqs = [cdl, exp, age, med, drug, work]
-    reqs_extra_pool = [
-        "Acceptable motor vehicle record (MVR) with no DUI, reckless driving, or at-fault accidents in the past 36 months",
-        "Not currently enrolled in a DOT Substance Abuse Professional (SAP) return-to-duty program",
-        "Able to meet FMCSA Hours of Service requirements",
-        "Strong commitment to safety and on-time delivery",
+    core_reqs = [req_cdl, req_age, req_med, req_screen]
+    reqs_pool = [
+        f"Ability to operate safely in {route_label} conditions",
+        "Acceptable driving record",
+        "Strong communication and time-management skills",
+        "Refrigerated (reefer) experience is helpful but not required",
         "Comfortable operating late-model automatic and manual equipment",
+        "Legally authorized to work in the United States",
     ]
-    reqs_items = core_reqs + _pick(reqs_extra_pool, opt_lo, max(opt_lo, opt_hi - 1))
-    sections["reqs"] = _section(titles["reqs"], _ul(reqs_items))
+    reqs = core_reqs + _sample(reqs_pool, random.randint(3, 5))
+    parts.append(_section("Requirements", _ul(reqs)))
 
-    # ── Optional sections ──
-    if perks:
-        sections["benefits"] = _section(titles["benefits"], _ul(perks))
+    # ── 8) Who This Job Is a Good Fit For ──
+    fit_para = random.choice([
+        f"This position is a good fit for drivers who want consistent {route_label} work, clear expectations, and direct communication. We are looking for drivers who take safety seriously and handle every load with care.",
+        f"This role suits drivers who want steady {route_label} miles, straight answers, and a dispatch team that communicates. We value drivers who put safety first and treat every load like it matters.",
+        f"If you want consistent {route_label} work, clear expectations, and a company that keeps communication honest, this is a good fit. We are looking for safety-minded drivers who take pride in the work.",
+        f"This is a strong fit for experienced drivers who want dependable {route_label} work, respect for their time, and a straightforward operation that does what it says.",
+    ])
+    parts.append(_section("Who This Job Is a Good Fit For", f"<p>{fit_para}</p>"))
 
-    culture_pool = [
-        "Dispatch team that picks up the phone and actually helps",
-        "Loads that keep moving — no sitting at the yard waiting around",
-        "Equipment that's maintained — we don't ask anyone to drive junk",
-        "A team that treats drivers like the professionals they are",
-        "Consistent lanes so you know what to expect week to week",
-        "A safety culture that's real, not just a poster on the wall",
-        "Direct deposit every week without fail",
-        "No micromanaging — do the job, get your miles, get home",
-        "Straight answers from recruiting, no bait-and-switch",
-        "Drivers who've stayed with us for years, not months",
-        "Planners who actually plan, so your week makes sense",
-        "Respect for your home time — when we put it in writing, we mean it",
-    ]
-    sections["culture"] = _section(titles["culture"], _ul(_pick(culture_pool, nb_lo, nb_hi)))
+    # ── 9) Equal Opportunity Statement (always last; ends with </i></p>) ──
+    eeo = random.choice([
+        f"{company} considers qualified applicants without regard to race, color, religion, sex, national origin, age, disability, veteran status, or any other legally protected status. {company} is an Equal Opportunity Employer.",
+        f"{company} is an Equal Opportunity Employer. All qualified applicants receive consideration for employment without regard to race, color, religion, sex, national origin, age, disability, veteran status, or any other characteristic protected by law.",
+        f"{company} provides equal employment opportunities to all applicants without regard to race, color, religion, sex, national origin, age, disability, genetic information, veteran status, or any other legally protected status.",
+        f"Employment decisions at {company} are made without regard to race, color, religion, sex, national origin, age, disability, veteran status, or any other characteristic protected by applicable federal, state, or local law. {company} is an Equal Opportunity Employer.",
+    ])
+    parts.append(_section("Equal Opportunity Statement", f"<p><i>{eeo}</i></p>"))
 
-    day_pool = [
-        f"You'll run {route_label.lower()} lanes across {coverage_noun}, with a planner who keeps your week organized and your hours legal.",
-        "Most days are a mix of drop-and-hook and live loads, planned so you're not burning your clock sitting at a dock.",
-        f"Out of {city_only}, you'll pick up steady dry van loads, keep dispatch in the loop, and get back home on schedule.",
-        "It's all no-touch, so your focus stays where it belongs: safe miles and on-time deliveries.",
-    ]
-    sections["day"] = _section(titles["day"], f"<p>{random.choice(day_pool)}</p>")
-
-    equipment_pool = [
-        "Late-model tractors, regularly inspected and well-maintained",
-        "Automatic transmissions available across much of the fleet",
-        "APU-equipped trucks for comfortable, legal rest",
-        "Trucks spec'd for the long haul, not run into the ground",
-        "Clean, modern equipment you'll be proud to drive",
-        "Preventive-maintenance program that keeps you rolling",
-    ]
-    sections["equipment"] = _section(titles["equipment"], _ul(_pick(equipment_pool, nb_lo, nb_hi)))
-
-    safety_pool = [
-        "We run in full compliance with FMCSA Hours of Service rules",
-        "ELD-equipped fleet with accurate, paperless logs",
-        "Ongoing safety training and support, not just onboarding",
-        "A culture where reporting an issue is encouraged, never punished",
-        "Maintenance and inspections handled on schedule, every time",
-    ]
-    sections["safety"] = _section(titles["safety"], _ul(_pick(safety_pool, nb_lo, nb_hi)))
-
-    # Apply CTA — on-platform only (Indeed Apply); no off-platform routing or
-    # misleading time guarantees, both of which get postings flagged/removed.
-    apply_lines = [
-        "Ready to make a move? Hit Apply and submit your application through Indeed — qualified drivers hear back quickly.",
-        f"If {company} sounds like the right fit, apply through Indeed and our team will review your application.",
-        "Applying takes a couple of minutes. Use the Apply button and we'll follow up on next steps.",
-        "Take the next step and apply on Indeed. We review applications regularly for qualified drivers.",
-        "Qualified and interested? Apply now through Indeed to get the process started.",
-        "Hit Apply to get started — qualified CDL-A drivers are reviewed promptly.",
-    ]
-    sections["apply"] = f"<p><b>{titles['apply']}</b></p>\n<p>{random.choice(apply_lines)}</p>"
-
-    # ── EEO (always last) ──
-    eeo_variants = [
-        f"{company} is an Equal Opportunity Employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, sex (including pregnancy, childbirth, and related medical conditions), national origin, age, disability, genetic information, veteran status, sexual orientation, gender identity, or any other characteristic protected by applicable federal, state, or local law.",
-        f"{company} provides equal employment opportunities to all applicants and employees without regard to race, color, religion, sex (including pregnancy, childbirth, and related medical conditions), national origin, age, disability, genetic information, veteran status, sexual orientation, gender identity, or any other legally protected status.",
-        f"Employment decisions at {company} are made without regard to race, color, religion, sex (including pregnancy, childbirth, and related medical conditions), national origin, age, disability, genetic information, veteran status, sexual orientation, gender identity, or any other characteristic protected by federal, state, or local law. {company} is an Equal Opportunity Employer.",
-        f"{company} is proud to be an Equal Opportunity Employer and does not discriminate on the basis of race, color, religion, sex (including pregnancy, childbirth, and related medical conditions), national origin, age, disability, genetic information, veteran status, sexual orientation, gender identity, or any other characteristic protected by law.",
-        f"All employment at {company} is decided on the basis of qualifications, merit, and business need. {company} is an Equal Opportunity Employer and complies with all applicable federal, state, and local fair-employment laws.",
-    ]
-    sections["eeo"] = f"<p><i>{random.choice(eeo_variants)}</i></p>"
-
-    # ── Choose optional sections + randomize order of the middle ──
-    mandatory_mid = ["pay", "route", "duties", "reqs"]
-    optional_mid = ["benefits", "culture", "day", "equipment", "safety", "apply"]
-    if "benefits" not in sections:
-        optional_mid.remove("benefits")
-    chosen_opt = _pick(optional_mid, opt_lo, opt_hi)
-    middle = mandatory_mid + chosen_opt
-    random.shuffle(middle)
-
-    order = ["intro"] + middle + ["eeo"]
-    return "\n\n".join(sections[k] for k in order)
-
+    return "\n\n".join(parts)
 
 def _natural_list(items) -> str:
     items = [str(i) for i in items if str(i).strip()]
