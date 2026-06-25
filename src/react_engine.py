@@ -473,23 +473,118 @@ def _compose_structure(rot):
     return arch, order, random.random() < spec["ticker"]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 50 FIXED DESIGNS, cycled in order
+# Each generation uses the next design in a deterministic ascending cycle, so
+# consecutive sites ALWAYS differ and all 50 distinct looks appear before any
+# repeat. Each design pins every high-impact lever — mode (light/dark), hero
+# archetype, font family + pair, brand hue, corner radius, colour-harmony scheme,
+# nav style, each section's layout, and the section order. Only copy / images /
+# which freight & coverage items appear still randomise per company, so the same
+# design renders as a believable (and still varied) trucking site for any client.
+# The list is built with index-seeded RNG → identical on every import/run.
+# ─────────────────────────────────────────────────────────────────────────────
+_DESIGN_INDEX_FILE = os.path.join(os.path.dirname(__file__), "..", "logs", "last_design_index.json")
+
+_D_MODES    = ["light", "dark"]
+_D_HEROES   = ["editorial", "split", "cinematic", "centered"]
+_D_NAVS     = ["rule", "solid", "floating"]
+_D_ABOUTS   = ["splitL", "splitR", "fullbleed", "centered"]
+_D_FREIGHT  = ["cards", "list", "split"]
+_D_SHOW     = ["marquee", "frame", "grid"]
+_D_FOOT     = ["wordmark", "columns", "minimal"]
+_D_SCHEMES  = ["complementary", "analogous", "triadic", "split", "monochrome"]
+_D_RADII    = [0, 2, 4, 8, 12, 16]
+_D_GRAINS   = [0.0, 0.03, 0.05, 0.06]
+_D_FAMILIES = ["serif", "display", "grotesk"]
+# curated brand hues (skips muddy yellow-greens ~60-90); ordered so a *7 stride
+# lands big colour hops between neighbours.
+_D_HUES = [8, 210, 145, 28, 265, 175, 330, 100, 248, 18,
+           200, 292, 158, 42, 225, 308, 122, 188, 338, 52]
+
+
+def _design_order(rng):
+    """Deterministic-but-varied section order + ticker flag for one design."""
+    arch = rng.choice(list(_ARCHETYPES))
+    lo, hi = _ARCHETYPES[arch]["mid"]
+    target = rng.randint(lo, hi)
+    fill_n = max(0, target - len(_SPINE))
+    fill = rng.sample(_OPTIONAL, min(fill_n, len(_OPTIONAL)))
+    order = _SPINE + fill
+    rng.shuffle(order)
+    return order, rng.random() < _ARCHETYPES[arch]["ticker"], arch
+
+
+def _build_designs(n=50):
+    """Build the fixed list of n distinct designs. Strides are chosen so that
+    neighbouring designs differ in the loudest levers (mode every step, hero
+    every step, font family every step, hue in big hops)."""
+    out = []
+    for i in range(n):
+        rng = random.Random(7001 + i * 13)   # stable, independent of global RNG
+        fam = _D_FAMILIES[(i * 2) % 3]
+        order, ticker, arch = _design_order(rng)
+        variants = {
+            "nav":          _D_NAVS[(i * 2) % 3],
+            "hero":         _D_HEROES[(i * 3) % 4],
+            "stats":        ["ledger", "strip"][i % 2],
+            "freight":      _D_FREIGHT[(i * 2) % 3],
+            "careers":      ["list", "accordion"][(i + 1) % 2],
+            "about":        _D_ABOUTS[(i * 3) % 4],
+            "process":      ["timeline", "numbered"][i % 2],
+            "showcase":     _D_SHOW[(i * 2) % 3],
+            "testimonials": ["pull", "cards"][(i + 1) % 2],
+            "footer":       _D_FOOT[(i * 2) % 3],
+        }
+        out.append({
+            "id": "d%02d" % i,
+            "mode": _D_MODES[i % 2],
+            "hue": _D_HUES[(i * 7) % len(_D_HUES)],
+            "scheme": _D_SCHEMES[(i * 3) % 5],
+            "radius": _D_RADII[(i * 5) % len(_D_RADII)],
+            "grain": _D_GRAINS[i % 4],
+            "family": fam,
+            "font_pair": rng.choice(_FONTS[fam]),
+            "script": rng.choice(_SCRIPTS),
+            "variants": variants,
+            "order": order, "ticker": ticker, "archetype": arch,
+        })
+    return out
+
+
+DESIGNS = _build_designs()
+
+
+def _next_design_index(n):
+    """Current design index for this generation, then advance the cyclic counter
+    (wraps at n). Plain ascending cycle 0..n-1 → no repeat until all n are used."""
+    idx = 0
+    try:
+        with open(_DESIGN_INDEX_FILE, encoding="utf-8") as f:
+            idx = int(json.load(f).get("next", 0)) % n
+    except (FileNotFoundError, ValueError, OSError, TypeError, KeyError):
+        idx = 0
+    try:
+        os.makedirs(os.path.dirname(_DESIGN_INDEX_FILE), exist_ok=True)
+        with open(_DESIGN_INDEX_FILE, "w", encoding="utf-8") as f:
+            json.dump({"next": (idx + 1) % n}, f)
+    except OSError:
+        pass
+    return idx
+
+
 def _build_payload(info):
     d = _build_data(info)
-    # rotate studio + palette + archetype so consecutive sites don't look alike
-    rot = _load_rot_state()
-    studio_recent = rot.get("studios", [])
-    sid = _rotate_pick([p["id"] for p in PRESETS], studio_recent, keep=4)
-    preset = next(p for p in PRESETS if p["id"] == sid)
-    pal_recent = rot.get("palettes", {}).get(sid, [])
-    pal_idx = _rotate_pick(list(range(len(THEMES[sid]))), pal_recent,
-                           keep=min(len(THEMES[sid]) - 1, 7))
-    theme = dict(THEMES[sid][pal_idx])
-    arch, order, show_ticker = _compose_structure(rot)
-    rot["studios"] = studio_recent
-    rot.setdefault("palettes", {})[sid] = pal_recent
-    _save_rot_state(rot)
-    fh, fb = random.choice(_FONTS[preset["fonts"]])
-    sf = random.choice(_SCRIPTS)
+    # Deterministic 50-design cycle: each generation uses the NEXT fixed design,
+    # so consecutive sites always differ and all 50 looks appear before any repeat.
+    design = DESIGNS[_next_design_index(len(DESIGNS))]
+    theme = _theory_theme(design["hue"], design["scheme"], design["radius"],
+                          design["grain"], design["mode"])
+    order = list(design["order"])
+    show_ticker = design["ticker"]
+    variants = design["variants"]
+    fh, fb = design["font_pair"]
+    sf = design["script"]
     hero_mix = random.choice(_HERO_MIX)
 
     imgs = [d["hero_src"], d["about_src"], d["coverage_src"], d["about2_src"]]
@@ -552,9 +647,9 @@ def _build_payload(info):
         "testimonials": [{"q": q, "n": n, "r": r} for q, n, r in d["testimonials"]],
         "perks": d["perks"], "showcase": showcase,
         "heroMix": hero_mix,
-        "studio": {"id": preset["id"], "label": preset["label"], "variants": _pick_variants(),
-                   "order": order, "ticker": show_ticker, "archetype": arch,
-                   "mode": theme["mode"], "fonts": preset["fonts"]},
+        "studio": {"id": design["id"], "label": "design " + design["id"], "variants": variants,
+                   "order": order, "ticker": show_ticker, "archetype": design.get("archetype", ""),
+                   "mode": theme["mode"], "fonts": design["family"]},
         "icons": icons,
     }
     return data, d, theme, fh, fb, sf
